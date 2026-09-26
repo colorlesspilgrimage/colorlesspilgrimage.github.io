@@ -4,16 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sam — colorless pilgrimage</title>
-    <meta
-      name="description"
-      content="Sam, in Saint Paul. A small homepage with a point of view, and the home of gamelog."
-    />
+    <meta name="description" content="Sam. GitHub, X, and email." />
     <meta name="theme-color" content="#12110e" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,550;0,6..72,650;1,6..72,400&family=Public+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,550&family=Public+Sans:ital,wght@0,400;0,500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
@@ -29,177 +26,15 @@
   </head>
   <body>
     <a class="skip" href="#main">Skip to content</a>
-    <header class="bar">
-      <div class="wrap bar-row">
-        <a class="word" href="#top">sam</a>
-        <nav aria-label="Page">
-          <a href="#now">Now</a>
-          <a href="#work">Work</a>
-          <a href="#defaults">Defaults</a>
-          <a href="#themes">Themes</a>
-        </nav>
-        <button id="theme-toggle" type="button">
-          <span class="dot" aria-hidden="true"></span>
-          <span id="theme-name">Ink</span>
-        </button>
-        <p id="clock" class="clock">Saint Paul</p>
-      </div>
-    </header>
-
     <main id="main">
-      <section id="top" class="wrap hero">
-        <div>
-          <p class="kicker">colorless pilgrimage · Saint Paul</p>
-          <h1>The default should already be good.</h1>
-          <p class="lede">
-            I’m Sam. I write small software with a point of view: one place for the work, keys that do the
-            obvious thing, and a theme you can throw out the moment it bores you.
-          </p>
-          <div class="actions">
-            <a class="btn solid" href="#work">See the work</a>
-            <a class="btn ghost" href="https://github.com/colorlesspilgrimage">GitHub</a>
-          </div>
-        </div>
-        <aside class="panel">
-          <p class="dim">~/.gamelog</p>
-          <p class="mark">entries.json</p>
-          <p class="dim">covers/</p>
-          <p class="dim">keybindings.toml</p>
-          <p class="dim">settings.toml</p>
-          <p class="panel-note">
-            one folder.<br />
-            plain JSON.<br />
-            yours to read.
-          </p>
-        </aside>
-      </section>
-
-      <section id="now" class="band">
-        <div class="wrap split">
-          <div>
-            <p class="kicker">01</p>
-            <h2>Now</h2>
-          </div>
-          <div>
-            <p class="prose">
-              Late September in Saint Paul. The public project is
-              <a href="https://github.com/colorlesspilgrimage/gamelog">gamelog</a>, a Rust program for the
-              games you actually play. This page is the first cut of the homepage — press <kbd>T</kbd> and
-              it changes clothes.
-            </p>
-            <ul class="stack">
-              <li>Terminal first. A desktop window if you want one. Same library either way.</li>
-              <li>No newsletter. The work is the update.</li>
-              <li>Based here, between the river and a terminal that still has yesterday’s session in it.</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section id="work" class="band">
-        <div class="wrap">
-          <p class="kicker">02</p>
-          <h2>Work</h2>
-          <p class="intro">One public project so far. More when they are worth the link.</p>
-          <article class="project">
-            <div>
-              <p class="dim">Rust · MIT</p>
-              <h3>gamelog</h3>
-            </div>
-            <div>
-              <p class="prose">
-                A terminal UI for logging the video games you play. Title, system, status, hours, a rating,
-                cover art, and a note — kept as plain JSON in a single hidden directory.
-              </p>
-              <dl class="facts">
-                <div>
-                  <dt>t</dt>
-                  <dd>Start a session. Stop it. The hours add themselves.</dd>
-                </div>
-                <div>
-                  <dt>/</dt>
-                  <dd>Search the library as you type. Sort is remembered.</dd>
-                </div>
-                <div>
-                  <dt>--gui</dt>
-                  <dd>A native window on the same files, when you want a mouse.</dd>
-                </div>
-              </dl>
-              <p class="more">
-                <a href="https://github.com/colorlesspilgrimage/gamelog">Source on GitHub →</a>
-              </p>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <section id="defaults" class="band">
-        <div class="wrap split">
-          <div>
-            <p class="kicker">03</p>
-            <h2>Defaults</h2>
-          </div>
-          <ol class="principles">
-            <li>
-              <p class="num">01</p>
-              <div>
-                <h3>One directory.</h3>
-                <p>
-                  gamelog keeps the library, covers, keys, and settings in ~/.gamelog. If you can list it,
-                  you can trust it.
-                </p>
-              </div>
-            </li>
-            <li>
-              <p class="num">02</p>
-              <div>
-                <h3>Keys before chrome.</h3>
-                <p>
-                  The interesting actions are keystrokes, written down in a TOML file you can edit. The
-                  window is there for the days you do not want that.
-                </p>
-              </div>
-            </li>
-            <li>
-              <p class="num">03</p>
-              <div>
-                <h3>Leave a trail.</h3>
-                <p>
-                  Hours, a status, a note about why you stopped. A log is more honest than a backlog you
-                  will never open.
-                </p>
-              </div>
-            </li>
-          </ol>
-        </div>
-      </section>
-
-      <section id="themes" class="band">
-        <div class="wrap">
-          <p class="kicker">04</p>
-          <h2 class="wide">Pick a theme. The whole page wears it.</h2>
-          <p class="intro">
-            Press <kbd>T</kbd>, or choose one. This browser remembers. The gesture is borrowed from
-            <a href="https://omarchy.org">Omarchy</a>.
-          </p>
-          <ul id="theme-list" class="themes"></ul>
-        </div>
-      </section>
+      <nav aria-label="Contact">
+        <a href="https://github.com/colorlesspilgrimage">GitHub</a>
+        <a href="https://x.com/samatbing">X</a>
+        <a href="mailto:samjdhood@gmail.com">samjdhood@gmail.com</a>
+      </nav>
+      <div id="theme-list" class="themes"></div>
+      <p class="hint">Press <kbd>T</kbd></p>
     </main>
-
-    <footer>
-      <div class="wrap foot">
-        <div>
-          <p class="sign">sam</p>
-          <p class="dim">Saint Paul · colorless pilgrimage</p>
-        </div>
-        <ul>
-          <li><a href="https://github.com/colorlesspilgrimage">GitHub</a></li>
-          <li><a href="https://github.com/colorlesspilgrimage/gamelog">gamelog</a></li>
-          <li><a href="https://x.com/samatbing">X</a></li>
-        </ul>
-      </div>
-    </footer>
     <script src="/site.js"></script>
   </body>
 </html>
