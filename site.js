@@ -1,16 +1,16 @@
 (function () {
   var THEMES = [
-    { id: "ink", name: "Ink" },
-    { id: "paper", name: "Paper" },
-    { id: "river", name: "River" },
-    { id: "ember", name: "Ember" },
-    { id: "moss", name: "Moss" },
-    { id: "dusk", name: "Dusk" },
+    { id: "darcula", name: "Darcula" },
+    { id: "day", name: "Day" },
+    { id: "string", name: "String" },
+    { id: "number", name: "Number" },
+    { id: "function", name: "Function" },
+    { id: "select", name: "Select" },
   ];
   var KEY = "pilgrimage-theme";
   var root = document.documentElement;
-  var current = root.getAttribute("data-theme") || "ink";
-  if (!THEMES.some(function (theme) { return theme.id === current; })) current = "ink";
+  var current = root.getAttribute("data-theme") || "darcula";
+  if (!THEMES.some(function (theme) { return theme.id === current; })) current = "darcula";
 
   var list = document.getElementById("theme-list");
 
