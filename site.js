@@ -1,5 +1,3 @@
-const WHEEL = ["themes", "github", "x", "mail"];
-
 const EYE = [["55.4","40.0"],["43.6","43.1"],["51.0","33.7"],["59.2","46.4"],["31.9","38.3"],["68.2","33.8"],["43.6","52.8"],["37.1","26.7"],["55.1","41.0"],["42.0","41.8"],["55.0","34.3"],["54.5","47.7"],["34.1","35.1"],["71.1","37.5"],["35.7","50.8"],["46.4","25.1"],["54.1","41.9"],["41.4","40.2"],["58.4","35.5"],["49.3","48.1"],["38.2","32.5"],["71.4","41.5"],["29.6","47.6"],["56.2","25.4"],["52.7","42.5"],["41.8","38.6"],["60.8","37.3"],["44.2","47.4"],["43.8","30.8"],["69.1","45.4"],["26.0","43.4"],["65.2","27.4"],["50.9","42.8"],["43.2","37.2"],["61.8","39.5"],["39.7","45.9"],["50.1","30.2"],["64.5","48.5"],["25.3","38.8"],["72.4","30.9"],["49.0","42.8"],["45.4","36.1"],["61.5","41.7"],["36.5","43.7"],["56.4","30.8"],["58.1","50.7"],["27.6","34.3"],["76.8","35.6"],["47.3","42.5"],["48.2","35.5"],["59.7","43.7"],["35.0","41.0"],["61.9","32.5"],["50.8","51.5"],["32.6","30.6"],["78.0","40.8"],["45.8","41.8"],["51.2","35.4"],["56.7","45.2"],["35.3","38.2"],["66.0","35.2"],["43.3","51.0"],["39.7","27.9"],["75.9","45.8"],["44.9","41.0"],["54.1","35.9"],["53.0","46.1"],["37.3","35.6"],["68.1","38.4"],["36.7","49.1"],["48.1","26.8"],["70.5","50.2"]];
 function paintEye() {
   const host = document.getElementById("eye-dots");
@@ -360,7 +358,7 @@ function startWheel() {
   const cards = Array.from(root.querySelectorAll(".card"));
   const sparks = Array.from(root.querySelectorAll(".spark"));
   const arcPath = document.getElementById("wheel-arc");
-  let offset = 1.5;
+  let offset = (cards.length - 1) / 2;
   let drag = null;
   let arcDrawn = false;
   let mobileLaid = false;
@@ -436,7 +434,7 @@ function startWheel() {
     if (horizontal()) return;
     event.preventDefault();
     const delta = Math.abs(event.deltaY) > Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
-    offset = Math.max(0, Math.min(WHEEL.length - 1, offset + delta * 0.0022));
+    offset = Math.max(0, Math.min(cards.length - 1, offset + delta * 0.0022));
     paint();
   }, { passive: false });
   root.addEventListener("scroll", paint, { passive: true });
@@ -449,7 +447,7 @@ function startWheel() {
     const delta = drag.y - event.clientY;
     if (Math.abs(delta) > 5 || Math.abs(event.clientX - drag.x) > 5) drag.moved = true;
     if (!drag.moved) return;
-    offset = Math.max(0, Math.min(WHEEL.length - 1, drag.offset + delta / 150));
+    offset = Math.max(0, Math.min(cards.length - 1, drag.offset + delta / 150));
     paint();
   });
   const onUp = () => {
