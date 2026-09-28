@@ -121,9 +121,12 @@ button {
   grid-template-rows: auto minmax(0, 1fr);
   background: var(--bg);
   color: var(--fg);
+  isolation: isolate;
 }
 
 .top {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -153,6 +156,8 @@ button {
 .top a:hover { color: var(--accent); }
 
 .stage {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: minmax(240px, 34vw) minmax(0, 1fr);
   min-height: 0;
@@ -540,11 +545,15 @@ button {
 }
 
 
+.eye-panel {
+  background: transparent;
+}
+
 .sauron {
   position: fixed;
-  right: 18px;
-  bottom: 14px;
-  z-index: 40;
+  right: 26px;
+  bottom: 22px;
+  z-index: 0;
   pointer-events: none;
   user-select: none;
 }
@@ -623,7 +632,7 @@ button {
   .status dl { flex-wrap: wrap; gap: 10px 14px; }
   .term { overflow: visible; }
   .links a { min-height: 44px; }
-  .sauron { right: 8px; bottom: 8px; }
+  .sauron { right: 14px; bottom: 14px; }
   .sauron-art { font-size: 8px; }
 }
 
