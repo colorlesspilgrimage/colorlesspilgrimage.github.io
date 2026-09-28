@@ -143,6 +143,112 @@ function placeEye() {
   const y = Math.max(8, Math.min(62, ny * 40 + 14));
   mark.setAttribute("transform", "translate(" + x.toFixed(1) + " " + y.toFixed(1) + ")");
 }
+
+const SAURON = [
+  "        .    |    .       ",
+  "     .-' \\   |   / '-.    ",
+  "   .'     \\  |  /     '.  ",
+  "  /    .---\\ | /---.    \\ ",
+  " |    /     \\|/     \\    |",
+  " |   |   .'--+--'.   |   |",
+  " |   |  /   §§§   \\  |   |",
+  " |   | |   §§§§§   | |   |",
+  " |   | |   §§§§§   | |   |",
+  " |   | |   §§§§§   | |   |",
+  " |   |  \\   §§§   /  |   |",
+  " |   |   '.__|__.'   |   |",
+  " |    \\     /|\\     /    |",
+  "  \\    '---/ | \\---'    / ",
+  "   '.     /  |  \\     .'  ",
+  "     '-. /   |   \\ .-'    ",
+  "        '    |    '       ",
+];
+const IRIS = [];
+SAURON.forEach((line, y) => {
+  for (let x = 0; x < line.length; x++) if (line[x] === "§") IRIS.push({ x, y });
+});
+const IRIS_XS = [...new Set(IRIS.map((cell) => cell.x))].sort((a, b) => a - b);
+const IRIS_YS = [...new Set(IRIS.map((cell) => cell.y))].sort((a, b) => a - b);
+let aimX = IRIS_XS[Math.floor(IRIS_XS.length / 2)];
+let aimY = (IRIS_YS[0] + IRIS_YS[IRIS_YS.length - 1]) / 2;
+let leanX = 0;
+let leanY = 0;
+let slitKey = "";
+
+function paintSauron(ax, ay) {
+  let col = IRIS_XS[0];
+  let best = Infinity;
+  for (const x of IRIS_XS) {
+    const d = Math.abs(x - ax);
+    if (d < best) { best = d; col = x; }
+  }
+  const ys = IRIS.filter((cell) => cell.x === col).map((cell) => cell.y).sort((a, b) => a - b);
+  const lit = new Set();
+  if (ys.length <= 3) ys.forEach((y) => lit.add(y));
+  else {
+    let bestScore = Infinity;
+    let start = 0;
+    for (let i = 0; i <= ys.length - 3; i++) {
+      const mean = (ys[i] + ys[i + 1] + ys[i + 2]) / 3;
+      const score = Math.abs(mean - ay);
+      if (score < bestScore) { bestScore = score; start = i; }
+    }
+    lit.add(ys[start]);
+    lit.add(ys[start + 1]);
+    lit.add(ys[start + 2]);
+  }
+  return SAURON.map((line, y) => {
+    let out = "";
+    for (let x = 0; x < line.length; x++) {
+      const ch = line[x];
+      if (ch === "§") out += x === col && lit.has(y) ? "<b>|</b>" : " ";
+      else out += ch;
+    }
+    return out;
+  }).join("\n");
+}
+
+function placeSauron() {
+  const node = $("sauron");
+  const art = $("sauron-art");
+  if (!node || !art || !IRIS.length) return;
+  if (!art.innerHTML) art.innerHTML = paintSauron(aimX, aimY);
+  const rect = node.getBoundingClientRect();
+  if (!rect.width) return;
+  const cx = rect.left + rect.width * 0.5;
+  const cy = rect.top + rect.height * 0.52;
+  const midX = (IRIS_XS[0] + IRIS_XS[IRIS_XS.length - 1]) / 2;
+  const midY = (IRIS_YS[0] + IRIS_YS[IRIS_YS.length - 1]) / 2;
+  let tx = midX;
+  let ty = midY;
+  let lx = 0;
+  let ly = 0;
+  if (hasPointer) {
+    const dx = pointerX - cx;
+    const dy = pointerY - cy;
+    const dist = Math.hypot(dx, dy) || 1;
+    const reach = Math.min(1, dist / 420);
+    const ux = dx / dist;
+    const uy = dy / dist;
+    tx = midX + ux * reach * (IRIS_XS[IRIS_XS.length - 1] - IRIS_XS[0]) * 0.5;
+    ty = midY + uy * reach * (IRIS_YS[IRIS_YS.length - 1] - IRIS_YS[0]) * 0.5;
+    lx = ux * reach * 16;
+    ly = uy * reach * 10;
+  }
+  const k = reduced ? 1 : 0.16;
+  aimX += (tx - aimX) * k;
+  aimY += (ty - aimY) * k;
+  leanX += (lx - leanX) * k;
+  leanY += (ly - leanY) * k;
+  if (reduced) art.style.transform = "";
+  else art.style.transform = "translate(" + leanX.toFixed(2) + "px," + leanY.toFixed(2) + "px) rotate(" + (leanX * 0.42).toFixed(2) + "deg)";
+  const key = Math.round(aimX) + ":" + Math.round(aimY);
+  if (key !== slitKey) {
+    slitKey = key;
+    art.innerHTML = paintSauron(aimX, aimY);
+  }
+}
+
 function tick() {
   const mouth = $("worm-mouth");
   if (!mouth) return;
@@ -162,6 +268,7 @@ function tick() {
     text("hand-readout", "—  —");
   }
   placeEye();
+  placeSauron();
 }
 function arc(t) {
   const bulge = Math.sin(Math.max(0, Math.min(1, t)) * Math.PI);

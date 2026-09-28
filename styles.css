@@ -539,6 +539,41 @@ button {
   border-color: var(--accent);
 }
 
+
+.sauron {
+  position: fixed;
+  right: 18px;
+  bottom: 14px;
+  z-index: 40;
+  pointer-events: none;
+  user-select: none;
+}
+
+.sauron-art {
+  margin: 0;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.02;
+  color: color-mix(in srgb, var(--fg) 72%, var(--accent));
+  text-shadow: 0 0 12px color-mix(in srgb, var(--accent) 50%, transparent);
+  transform-origin: 50% 52%;
+  animation: sauron-watch 3.2s ease-in-out infinite;
+}
+
+.sauron-art b {
+  font-weight: 500;
+  color: var(--hot);
+  text-shadow:
+    0 0 2px var(--hot),
+    0 0 8px var(--accent),
+    0 0 16px var(--accent);
+}
+
+@keyframes sauron-watch {
+  0%, 100% { opacity: 0.82; }
+  50% { opacity: 1; }
+}
+
 @media (max-width: 860px) {
   body { overflow: auto; overflow-x: hidden; }
   .desk { height: auto; min-height: 100dvh; overflow: visible; max-width: 100%; }
@@ -588,8 +623,10 @@ button {
   .status dl { flex-wrap: wrap; gap: 10px 14px; }
   .term { overflow: visible; }
   .links a { min-height: 44px; }
+  .sauron { right: 8px; bottom: 8px; }
+  .sauron-art { font-size: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spark, .caret, .glyph, .seg-line, .worm { animation: none; transition: none; }
+  .spark, .caret, .glyph, .seg-line, .worm, .sauron-art { animation: none; transition: none; }
 }
