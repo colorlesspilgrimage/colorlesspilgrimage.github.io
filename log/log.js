@@ -4,9 +4,8 @@ const STORE = "pilgrimage-log";
 const OPEN_KEY = "pilgrimage-log-open";
 const KEEP_KEY = "pilgrimage-log-keep";
 const PHRASE_KEY = "pilgrimage-log-phrase";
-const TOKEN_KEY = "pilgrimage-log-gh";
 const THEME_KEY = "pilgrimage-theme";
-const GH_API = "https://api.github.com/repos/colorlesspilgrimage/colorlesspilgrimage.github.io/contents/log/vault.json";
+const RENTRY = "cp-log-vault";
 const KDF_ITERS = 210000;
 const THEMES = ["darcula", "day", "string", "number", "function", "select"];
 const STATUSES = ["playing", "to-play", "played"];
@@ -26,7 +25,6 @@ let titleCommit = false;
 const lookupGen = new Map();
 const probeCache = new Map();
 let phrase = "";
-let remoteSha = "";
 let sawRemote = false;
 let pushTimer = 0;
 let pushing = false;
@@ -319,20 +317,24 @@ function mergeRemote(remote) {
   state.updatedAt = Math.max(Number(state.updatedAt) || 0, Number(remote.updatedAt) || 0);
 }
 
-function ghHeaders() {
-  return {
-    Authorization: "Bearer " + token(),
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
+async function hmacHex(passphrase, message) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
+  return [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function token() {
-  try {
-    return (localStorage.getItem(TOKEN_KEY) || "").trim();
-  } catch (e) {
-    return "";
-  }
+function editCode(passphrase) {
+  return hmacHex(passphrase, "pilgrimage-log-edit-v2").then((hex) => hex.slice(0, 16));
+}
+
+function macVault(passphrase, vault) {
+  return hmacHex(passphrase, vault.salt + "." + vault.iv + "." + vault.data);
 }
 
 function setSync(text) {
@@ -340,61 +342,82 @@ function setSync(text) {
   if (node) node.textContent = text;
 }
 
-function paintSyncForm() {
-  const linked = !!token();
-  const input = $("gh-token");
-  const help = $("token-help");
-  const button = $("sync-form") && $("sync-form").querySelector("button");
-  if (input) input.classList.toggle("is-off", linked);
-  if (help) help.classList.toggle("is-off", linked);
-  if (button) button.textContent = linked ? "unlink" : "link";
-}
-
 function schedulePush() {
-  if (suspendPush || !phrase || !token() || !sawRemote) return;
+  if (suspendPush || !phrase || !sawRemote) return;
   window.clearTimeout(pushTimer);
   pushTimer = window.setTimeout(() => { pushVault(); }, 1200);
 }
 
-async function githubMeta() {
-  const res = await fetch(GH_API, { headers: ghHeaders(), cache: "no-store" });
-  if (res.status === 404) return { sha: "", json: null };
-  if (!res.ok) throw new Error("read " + res.status);
-  const meta = await res.json();
-  const json = JSON.parse(new TextDecoder().decode(b64ToBytes(meta.content || "")));
-  return { sha: meta.sha || "", json };
+async function readGitVault() {
+  const res = await fetch("/log/vault.json?t=" + Date.now(), { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("read");
+  return res.json();
 }
 
-async function readRemote() {
-  if (token()) return githubMeta();
-  const res = await fetch("/log/vault.json?t=" + Date.now(), { cache: "no-store" });
-  if (res.status === 404) return { sha: "", json: null };
-  if (!res.ok) throw new Error("read " + res.status);
-  return { sha: "", json: await res.json() };
+async function readRentry() {
+  const res = await fetch("https://rentry.co/api/fetch/" + RENTRY, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ edit_code: await editCode(phrase) }),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("read");
+  const data = await res.json();
+  if (!data || String(data.status) !== "200" || !data.content || !data.content.text) return null;
+  return JSON.parse(data.content.text);
+}
+
+async function vaultPlain(json) {
+  if (!json) return null;
+  if (json.mac && !hashesEqual(await macVault(phrase, json), String(json.mac))) throw new Error("mac");
+  return decryptVault(phrase, json);
 }
 
 async function pullVault() {
   if (!phrase) return;
-  setSync(token() ? "server · reading" : "server · reading");
-  let remote;
+  setSync("server · reading");
+  let json = null;
+  let live = false;
   try {
-    remote = await readRemote();
+    json = await readRentry();
+    live = true;
   } catch (e) {
-    setSync("server · offline");
-    return;
+    json = null;
+  }
+  if (!json) {
+    try {
+      json = await readGitVault();
+      live = false;
+    } catch (e) {
+      setSync("server · offline");
+      return;
+    }
   }
   sawRemote = true;
-  remoteSha = remote.sha || "";
-  if (!remote.json) {
-    setSync(token() ? "server · empty" : "server · link a token");
-    if (token() && state.entries.length) schedulePush();
+  if (!json) {
+    setSync("server · empty");
+    if (state.entries.length) schedulePush();
     return;
   }
   let plain;
   try {
-    plain = await decryptVault(phrase, remote.json);
+    plain = await vaultPlain(json);
   } catch (e) {
-    setSync("server · locked");
+    if (!live) {
+      setSync("server · locked");
+      return;
+    }
+    try {
+      plain = await vaultPlain(await readGitVault());
+    } catch (err) {
+      setSync("server · locked");
+      return;
+    }
+  }
+  if (!plain) {
+    setSync("server · empty");
+    if (state.entries.length) schedulePush();
     return;
   }
   suspendPush = true;
@@ -402,62 +425,57 @@ async function pullVault() {
   saveLocal();
   suspendPush = false;
   render();
-  if (canon(snapshot()) !== canon(plain)) {
-    if (token()) schedulePush();
-    else setSync("server · encrypted · link a token");
-  } else {
-    setSync(token() ? "server · saved" : "server · encrypted · link a token");
-  }
+  if (canon(snapshot()) !== canon(plain)) schedulePush();
+  else setSync("server · saved");
 }
 
 async function pushVault() {
-  if (!phrase || !token() || !sawRemote) return;
-  if (pushing) return;
+  if (!phrase || !sawRemote || pushing) return;
   pushing = true;
   setSync("server · writing");
   try {
-    let meta = await githubMeta();
-    if (meta.json) {
-      try {
-        const plain = await decryptVault(phrase, meta.json);
-        if (canon(snapshot()) !== canon(plain)) {
-          suspendPush = true;
-          mergeRemote(plain);
-          state.updatedAt = Date.now();
-          saveLocal();
-          suspendPush = false;
-          render();
-        }
-        meta = { sha: meta.sha, json: meta.json };
-      } catch (e) {
-        setSync("server · locked");
-        pushing = false;
-        return;
+    const remote = await readRentry();
+    if (remote) {
+      const plain = await vaultPlain(remote);
+      if (plain && canon(snapshot()) !== canon(plain)) {
+        suspendPush = true;
+        mergeRemote(plain);
+        state.updatedAt = Date.now();
+        saveLocal();
+        suspendPush = false;
+        render();
       }
     }
     const vault = await encryptVault(phrase, snapshot());
-    const res = await fetch(GH_API, {
-      method: "PUT",
-      headers: { ...ghHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: "Update encrypted log",
-        content: utf8ToB64(JSON.stringify(vault)),
-        branch: "main",
-        sha: meta.sha || undefined,
-      }),
+    vault.mac = await macVault(phrase, vault);
+    const body = new URLSearchParams({
+      edit_code: await editCode(phrase),
+      text: JSON.stringify(vault),
     });
-    if ((res.status === 409 || res.status === 422) && pushTries < 2) {
+    let res = await fetch("https://rentry.co/api/edit/" + RENTRY, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    if (res.status === 404) {
+      body.set("url", RENTRY);
+      res = await fetch("https://rentry.co/api/new", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+      });
+    }
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || String(data.status) !== "200") throw new Error("write");
+    pushTries = 0;
+    setSync("server · saved");
+  } catch (e) {
+    if (pushTries < 2) {
       pushTries += 1;
       pushing = false;
       schedulePush();
       return;
     }
-    if (!res.ok) throw new Error("write " + res.status);
-    const saved = await res.json();
-    remoteSha = (saved.content && saved.content.sha) || remoteSha;
-    pushTries = 0;
-    setSync("server · saved");
-  } catch (e) {
     setSync("server · not written");
   }
   pushing = false;
@@ -1168,41 +1186,6 @@ window.addEventListener("keydown", (event) => {
 
 window.setInterval(tickClocks, 1000);
 
-$("sync-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (token()) {
-    try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
-    paintSyncForm();
-    setSync("server · link a token");
-    return;
-  }
-  const input = $("gh-token");
-  const value = (input.value || "").trim();
-  if (!value) return;
-  setSync("server · checking token");
-  try {
-    const res = await fetch("https://api.github.com/repos/colorlesspilgrimage/colorlesspilgrimage.github.io", {
-      headers: {
-        Authorization: "Bearer " + value,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    });
-    if (!res.ok) {
-      setSync("server · token refused");
-      return;
-    }
-    localStorage.setItem(TOKEN_KEY, value);
-    input.value = "";
-    paintSyncForm();
-    sawRemote = false;
-    pullVault();
-  } catch (e) {
-    setSync("server · token refused");
-  }
-});
-
-paintSyncForm();
 phrase = storedPhrase();
 if (phrase && isOpen()) {
   showBoard();
