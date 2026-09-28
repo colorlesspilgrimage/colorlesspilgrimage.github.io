@@ -390,6 +390,38 @@ html.log-open #board.is-off { display: flex !important; }
   .confirm-row button { min-height: 44px; }
 }
 
+.sync {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sync p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  min-width: 12em;
+}
+
+.sync input { max-width: 240px; flex: 1 1 160px; }
+
+.sync button,
+.sync a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  padding: 0 12px;
+  background: transparent;
+}
+
+.sync a { text-decoration: none; }
+.sync button:hover,
+.sync a:hover { color: var(--fg); border-color: var(--fg); }
+
 @media (prefers-reduced-motion: reduce) {
   .live-pip { animation: none; }
 }

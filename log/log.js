@@ -3,7 +3,11 @@ const GATE = "aa2f27c9fc8e897a43af876b8050c834b77c2379356f746c1f272c09e73658a8";
 const STORE = "pilgrimage-log";
 const OPEN_KEY = "pilgrimage-log-open";
 const KEEP_KEY = "pilgrimage-log-keep";
+const PHRASE_KEY = "pilgrimage-log-phrase";
+const TOKEN_KEY = "pilgrimage-log-gh";
 const THEME_KEY = "pilgrimage-theme";
+const GH_API = "https://api.github.com/repos/colorlesspilgrimage/colorlesspilgrimage.github.io/contents/log/vault.json";
+const KDF_ITERS = 210000;
 const THEMES = ["darcula", "day", "string", "number", "function", "select"];
 const STATUSES = ["playing", "to-play", "played"];
 const STATUS_LABEL = { playing: "playing", "to-play": "to play", played: "played" };
@@ -21,6 +25,13 @@ let focusTime = false;
 let titleCommit = false;
 const lookupGen = new Map();
 const probeCache = new Map();
+let phrase = "";
+let remoteSha = "";
+let sawRemote = false;
+let pushTimer = 0;
+let pushing = false;
+let pushTries = 0;
+let suspendPush = false;
 
 function $(id) { return document.getElementById(id); }
 
@@ -147,26 +158,48 @@ function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE) || "null");
     const entries = raw && Array.isArray(raw.entries) ? raw.entries.map(cleanEntry).filter(Boolean) : [];
-    return { entries };
+    const dropped = raw && Array.isArray(raw.dropped) ? cleanDropped(raw.dropped) : [];
+    return { entries, dropped, updatedAt: Number(raw && raw.updatedAt) || 0 };
   } catch (e) {
-    return { entries: [] };
+    return { entries: [], dropped: [], updatedAt: 0 };
   }
 }
 
+function cleanDropped(list) {
+  return list
+    .filter((row) => row && typeof row.id === "string" && row.id.length < 80)
+    .map((row) => ({ id: row.id, at: Number(row.at) || 0 }))
+    .slice(-400);
+}
+
+function snapshot() {
+  return {
+    version: 1,
+    updatedAt: state.updatedAt || 0,
+    entries: state.entries.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      status: entry.status,
+      playedMs: entry.playedMs,
+      sessionStart: entry.sessionStart,
+      cover: entry.cover,
+      alts: entry.alts,
+      artMiss: entry.artMiss === true,
+      touchedAt: entry.touchedAt,
+      addedAt: entry.addedAt,
+    })),
+    dropped: cleanDropped(state.dropped || []),
+  };
+}
+
+function saveLocal() {
+  localStorage.setItem(STORE, JSON.stringify(snapshot()));
+}
+
 function save() {
-  const entries = state.entries.map((entry) => ({
-    id: entry.id,
-    title: entry.title,
-    status: entry.status,
-    playedMs: entry.playedMs,
-    sessionStart: entry.sessionStart,
-    cover: entry.cover,
-    alts: entry.alts,
-    artMiss: entry.artMiss === true,
-    touchedAt: entry.touchedAt,
-    addedAt: entry.addedAt,
-  }));
-  localStorage.setItem(STORE, JSON.stringify({ version: 1, entries }));
+  state.updatedAt = Date.now();
+  saveLocal();
+  if (!suspendPush) schedulePush();
 }
 
 function entryById(id) {
@@ -183,6 +216,276 @@ function hashesEqual(a, b) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+function bytesToB64(bytes) {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+function b64ToBytes(value) {
+  const bin = atob(String(value).replace(/\s/g, ""));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function utf8ToB64(text) {
+  return bytesToB64(new TextEncoder().encode(text));
+}
+
+async function deriveKey(passphrase, salt, iterations) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  const rounds = Math.max(100000, Math.min(600000, Number(iterations) || KDF_ITERS));
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: rounds, hash: "SHA-256" },
+    base,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptVault(passphrase, obj) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(passphrase, salt, KDF_ITERS);
+  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify(obj)));
+  return {
+    v: 1,
+    kdf: "PBKDF2-SHA256",
+    iter: KDF_ITERS,
+    salt: bytesToB64(salt),
+    iv: bytesToB64(iv),
+    data: bytesToB64(new Uint8Array(cipher)),
+  };
+}
+
+async function decryptVault(passphrase, vault) {
+  if (!vault || vault.v !== 1 || !vault.salt || !vault.iv || !vault.data) throw new Error("vault");
+  const key = await deriveKey(passphrase, b64ToBytes(vault.salt), vault.iter);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64ToBytes(vault.iv) }, key, b64ToBytes(vault.data));
+  const data = JSON.parse(new TextDecoder().decode(plain));
+  if (!data || !Array.isArray(data.entries)) throw new Error("vault");
+  return data;
+}
+
+function canon(data) {
+  const entries = (data.entries || []).map((entry) => ({
+    id: entry.id,
+    title: entry.title,
+    status: entry.status,
+    playedMs: entry.playedMs,
+    sessionStart: entry.sessionStart || null,
+    cover: entry.cover || "",
+    alts: (entry.alts || []).map((alt) => (alt && alt.url) || "").join("|"),
+    artMiss: entry.artMiss === true,
+    touchedAt: entry.touchedAt || 0,
+    addedAt: entry.addedAt || 0,
+  }));
+  entries.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const dropped = cleanDropped(data.dropped || []).map((row) => row.id + "@" + row.at).sort();
+  return JSON.stringify({ entries, dropped });
+}
+
+function mergeRemote(remote) {
+  const dropped = cleanDropped([...(state.dropped || []), ...(remote.dropped || [])]);
+  const dropAt = new Map();
+  for (const row of dropped) {
+    if (!dropAt.has(row.id) || row.at > dropAt.get(row.id)) dropAt.set(row.id, row.at);
+  }
+  const byId = new Map();
+  const incoming = []
+    .concat(remote.entries || [])
+    .concat(state.entries)
+    .map(cleanEntry)
+    .filter(Boolean);
+  for (const entry of incoming) {
+    const prev = byId.get(entry.id);
+    if (!prev || (entry.touchedAt || 0) >= (prev.touchedAt || 0)) byId.set(entry.id, entry);
+  }
+  const entries = [];
+  for (const entry of byId.values()) {
+    const gone = dropAt.get(entry.id);
+    if (gone && gone >= (entry.touchedAt || 0)) continue;
+    entries.push(entry);
+  }
+  state.entries = entries;
+  state.dropped = [...dropAt.entries()].map(([id, at]) => ({ id, at })).slice(-400);
+  state.updatedAt = Math.max(Number(state.updatedAt) || 0, Number(remote.updatedAt) || 0);
+}
+
+function ghHeaders() {
+  return {
+    Authorization: "Bearer " + token(),
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+}
+
+function token() {
+  try {
+    return (localStorage.getItem(TOKEN_KEY) || "").trim();
+  } catch (e) {
+    return "";
+  }
+}
+
+function setSync(text) {
+  const node = $("sync");
+  if (node) node.textContent = text;
+}
+
+function paintSyncForm() {
+  const linked = !!token();
+  const input = $("gh-token");
+  const help = $("token-help");
+  const button = $("sync-form") && $("sync-form").querySelector("button");
+  if (input) input.classList.toggle("is-off", linked);
+  if (help) help.classList.toggle("is-off", linked);
+  if (button) button.textContent = linked ? "unlink" : "link";
+}
+
+function schedulePush() {
+  if (suspendPush || !phrase || !token() || !sawRemote) return;
+  window.clearTimeout(pushTimer);
+  pushTimer = window.setTimeout(() => { pushVault(); }, 1200);
+}
+
+async function githubMeta() {
+  const res = await fetch(GH_API, { headers: ghHeaders(), cache: "no-store" });
+  if (res.status === 404) return { sha: "", json: null };
+  if (!res.ok) throw new Error("read " + res.status);
+  const meta = await res.json();
+  const json = JSON.parse(new TextDecoder().decode(b64ToBytes(meta.content || "")));
+  return { sha: meta.sha || "", json };
+}
+
+async function readRemote() {
+  if (token()) return githubMeta();
+  const res = await fetch("/log/vault.json?t=" + Date.now(), { cache: "no-store" });
+  if (res.status === 404) return { sha: "", json: null };
+  if (!res.ok) throw new Error("read " + res.status);
+  return { sha: "", json: await res.json() };
+}
+
+async function pullVault() {
+  if (!phrase) return;
+  setSync(token() ? "server · reading" : "server · reading");
+  let remote;
+  try {
+    remote = await readRemote();
+  } catch (e) {
+    setSync("server · offline");
+    return;
+  }
+  sawRemote = true;
+  remoteSha = remote.sha || "";
+  if (!remote.json) {
+    setSync(token() ? "server · empty" : "server · link a token");
+    if (token() && state.entries.length) schedulePush();
+    return;
+  }
+  let plain;
+  try {
+    plain = await decryptVault(phrase, remote.json);
+  } catch (e) {
+    setSync("server · locked");
+    return;
+  }
+  suspendPush = true;
+  mergeRemote(plain);
+  saveLocal();
+  suspendPush = false;
+  render();
+  if (canon(snapshot()) !== canon(plain)) {
+    if (token()) schedulePush();
+    else setSync("server · encrypted · link a token");
+  } else {
+    setSync(token() ? "server · saved" : "server · encrypted · link a token");
+  }
+}
+
+async function pushVault() {
+  if (!phrase || !token() || !sawRemote) return;
+  if (pushing) return;
+  pushing = true;
+  setSync("server · writing");
+  try {
+    let meta = await githubMeta();
+    if (meta.json) {
+      try {
+        const plain = await decryptVault(phrase, meta.json);
+        if (canon(snapshot()) !== canon(plain)) {
+          suspendPush = true;
+          mergeRemote(plain);
+          state.updatedAt = Date.now();
+          saveLocal();
+          suspendPush = false;
+          render();
+        }
+        meta = { sha: meta.sha, json: meta.json };
+      } catch (e) {
+        setSync("server · locked");
+        pushing = false;
+        return;
+      }
+    }
+    const vault = await encryptVault(phrase, snapshot());
+    const res = await fetch(GH_API, {
+      method: "PUT",
+      headers: { ...ghHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: "Update encrypted log",
+        content: utf8ToB64(JSON.stringify(vault)),
+        branch: "main",
+        sha: meta.sha || undefined,
+      }),
+    });
+    if ((res.status === 409 || res.status === 422) && pushTries < 2) {
+      pushTries += 1;
+      pushing = false;
+      schedulePush();
+      return;
+    }
+    if (!res.ok) throw new Error("write " + res.status);
+    const saved = await res.json();
+    remoteSha = (saved.content && saved.content.sha) || remoteSha;
+    pushTries = 0;
+    setSync("server · saved");
+  } catch (e) {
+    setSync("server · not written");
+  }
+  pushing = false;
+}
+
+function rememberPhrase(text, keep) {
+  phrase = text;
+  try {
+    sessionStorage.setItem(PHRASE_KEY, text);
+    if (keep) localStorage.setItem(PHRASE_KEY, text);
+    else localStorage.removeItem(PHRASE_KEY);
+  } catch (e) {}
+}
+
+function forgetPhrase() {
+  phrase = "";
+  try {
+    sessionStorage.removeItem(PHRASE_KEY);
+    localStorage.removeItem(PHRASE_KEY);
+  } catch (e) {}
+}
+
+function storedPhrase() {
+  try {
+    return sessionStorage.getItem(PHRASE_KEY) || localStorage.getItem(PHRASE_KEY) || "";
+  } catch (e) {
+    return "";
+  }
 }
 
 function probe(url) {
@@ -572,16 +875,19 @@ function lock() {
     sessionStorage.removeItem(OPEN_KEY);
     localStorage.removeItem(KEEP_KEY);
   } catch (e) {}
+  forgetPhrase();
   showGate();
 }
 
-function openLog(keep) {
+function openLog(keep, text) {
   try {
     sessionStorage.setItem(OPEN_KEY, "1");
     if (keep) localStorage.setItem(KEEP_KEY, "1");
     else localStorage.removeItem(KEEP_KEY);
   } catch (e) {}
+  rememberPhrase(text, keep);
   showBoard();
+  pullVault();
 }
 
 function isOpen() {
@@ -698,6 +1004,8 @@ function onCardClick(event) {
   }
   if (act === "drop") {
     state.entries = state.entries.filter((item) => item.id !== entry.id);
+    state.dropped = state.dropped || [];
+    state.dropped.push({ id: entry.id, at: Date.now() });
     dropId = null;
     if (pendingEndId === entry.id) pendingEndId = null;
     save();
@@ -738,6 +1046,12 @@ async function importPile(file) {
   const entries = (data && Array.isArray(data.entries) ? data.entries : []).map(cleanEntry).filter(Boolean);
   if (!entries.length) throw new Error("empty");
   if (!window.confirm("Replace the pile with " + entries.length + " entries?")) return;
+  const now = Date.now();
+  const nextIds = new Set(entries.map((entry) => entry.id));
+  state.dropped = state.dropped || [];
+  for (const entry of state.entries) {
+    if (!nextIds.has(entry.id)) state.dropped.push({ id: entry.id, at: now });
+  }
   state.entries = entries;
   dropId = null;
   pendingEndId = null;
@@ -773,7 +1087,7 @@ $("gate-form").addEventListener("submit", async (event) => {
     return;
   }
   pass.value = "";
-  openLog($("keep").checked);
+  openLog($("keep").checked, phrase);
 });
 
 $("add-form").addEventListener("submit", (event) => {
@@ -854,5 +1168,45 @@ window.addEventListener("keydown", (event) => {
 
 window.setInterval(tickClocks, 1000);
 
-if (isOpen()) showBoard();
-else showGate();
+$("sync-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (token()) {
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+    paintSyncForm();
+    setSync("server · link a token");
+    return;
+  }
+  const input = $("gh-token");
+  const value = (input.value || "").trim();
+  if (!value) return;
+  setSync("server · checking token");
+  try {
+    const res = await fetch("https://api.github.com/repos/colorlesspilgrimage/colorlesspilgrimage.github.io", {
+      headers: {
+        Authorization: "Bearer " + value,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+    if (!res.ok) {
+      setSync("server · token refused");
+      return;
+    }
+    localStorage.setItem(TOKEN_KEY, value);
+    input.value = "";
+    paintSyncForm();
+    sawRemote = false;
+    pullVault();
+  } catch (e) {
+    setSync("server · token refused");
+  }
+});
+
+paintSyncForm();
+phrase = storedPhrase();
+if (phrase && isOpen()) {
+  showBoard();
+  pullVault();
+} else {
+  showGate();
+}
