@@ -100,21 +100,6 @@ button {
   padding: 0;
 }
 
-.skip {
-  position: absolute;
-  left: -999px;
-  top: 0;
-}
-
-.skip:focus {
-  left: 12px;
-  top: 12px;
-  z-index: 40;
-  background: var(--fg);
-  color: var(--bg);
-  padding: 8px 12px;
-}
-
 .desk {
   height: 100dvh;
   display: grid;
@@ -264,24 +249,6 @@ button {
   box-shadow: 8px 0 0 -7px var(--fg);
 }
 
-.mark-face {
-  align-items: flex-start;
-  justify-content: space-between;
-  min-height: 112px;
-}
-
-.mark-face b {
-  font-size: 42px;
-  font-weight: 500;
-  letter-spacing: -0.06em;
-  line-height: 0.9;
-}
-
-.mark-face span { color: var(--muted); font-size: 10px; }
-
-.log-face span { display: block; color: var(--muted); font-size: 11px; }
-.log-bar { color: var(--fg) !important; margin-bottom: 8px; }
-
 .link-face {
   justify-content: flex-end;
   font-size: 13px;
@@ -376,8 +343,7 @@ button {
 .root-copy p,
 .root-foot,
 .echo-note,
-.card-id,
-.shell p {
+.card-id {
   margin: 0;
 }
 
@@ -433,105 +399,12 @@ button {
 .eye-svg circle { fill: var(--muted); }
 .eye-svg rect { fill: none; stroke: var(--fg); stroke-width: 0.8; }
 
-.shell { max-width: 68ch; padding-bottom: 8px; }
-.shell p { min-height: 1.45em; }
-.shell .prompt { color: var(--muted); margin-top: 10px; }
-.shell .cmd { color: var(--fg); }
-.shell a { border-bottom: 1px solid var(--line); }
-.shell a:hover { color: var(--accent); border-bottom-color: var(--accent); }
-.links { display: flex; gap: 18px; }
-.links a { min-height: 32px; display: inline-flex; align-items: center; }
-
-.caret {
-  display: inline-block;
-  width: 7px;
-  height: 13px;
-  background: var(--accent);
-  transform: translateY(2px);
-  animation: blink 1.1s steps(1) infinite;
-}
-
 @keyframes blink {
   50% { opacity: 0; }
 }
 
 .glyph { transition: opacity 90ms linear; }
 .glyph.eaten { opacity: 0; }
-
-.status {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  border-top: 1px solid var(--line);
-  padding: 8px 16px;
-  min-height: 42px;
-}
-
-.status-id { display: flex; flex-direction: column; min-width: 118px; }
-.status-id strong { font-weight: 500; letter-spacing: 0.08em; font-size: 11px; }
-.status-id span, .status dt { color: var(--muted); }
-
-.status dl {
-  display: flex;
-  gap: 16px;
-  margin: 0;
-  flex: 1;
-}
-
-.status dl div { display: flex; flex-direction: column; gap: 1px; }
-.status dt { font-size: 9px; letter-spacing: 0.08em; }
-.status dd { margin: 0; }
-
-.ghost-pip {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border: 1px solid var(--fg);
-  border-radius: 50%;
-  margin-right: 4px;
-  transform: translateY(1px);
-}
-
-.pulse {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 18px;
-}
-
-.pulse i {
-  display: block;
-  width: 3px;
-  height: 2px;
-  background: var(--fg);
-  opacity: 0.85;
-}
-
-.keys {
-  display: flex;
-  justify-content: center;
-  align-items: flex-end;
-  gap: 28px;
-  padding: 6px 16px 14px;
-}
-
-.keydeck { display: flex; flex-direction: column; gap: 3px; align-items: center; }
-.keyrow { display: flex; gap: 3px; }
-.key {
-  width: 18px;
-  height: 16px;
-  border: 1px solid var(--line);
-  display: grid;
-  place-items: center;
-  font-size: 8px;
-  color: var(--muted);
-}
-.key.lit, .t-key { color: var(--fg); border-color: var(--fg); }
-.t-key { box-shadow: inset 0 -2px 0 var(--accent); }
-
-.hand { display: flex; flex-direction: column; align-items: center; color: var(--muted); font-size: 10px; }
-.hand svg { width: 54px; height: 44px; }
-.hand rect, .hand line, .hand circle { fill: none; stroke: var(--fg); stroke-width: 1; }
 
 .worm {
   position: fixed;
@@ -626,7 +499,7 @@ button {
   }
   .swatch { min-height: 44px; font-size: 12px; }
   .panels { grid-template-columns: 1fr; }
-  .eye-panel, .keys { display: none; }
+  .eye-panel { display: none; }
   .root-stage {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto auto;
@@ -640,15 +513,12 @@ button {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
   }
-  .status { flex-wrap: wrap; align-items: flex-start; }
-  .status dl { flex-wrap: wrap; gap: 10px 14px; }
   .term { overflow: visible; }
-  .links a { min-height: 44px; }
   .top-nav a { min-height: 44px; }
   .sauron { right: 14px; bottom: 14px; }
   .sauron-art { font-size: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spark, .caret, .glyph, .seg-line, .worm, .sauron-art { animation: none; transition: none; }
+  .spark, .glyph, .seg-line, .worm, .sauron-art { animation: none; transition: none; }
 }

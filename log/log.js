@@ -57,6 +57,10 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 
+function tidyTitle(value) {
+  return String(value).trim().replace(/\s+/g, " ").slice(0, 180);
+}
+
 function normalize(value) {
   return String(value)
     .toLowerCase()
@@ -123,7 +127,7 @@ function totalBanked() {
 
 function cleanEntry(raw) {
   if (!raw || typeof raw.title !== "string") return null;
-  const title = raw.title.trim().replace(/\s+/g, " ").slice(0, 180);
+  const title = tidyTitle(raw.title);
   if (!title) return null;
   const status = STATUSES.includes(raw.status) ? raw.status : "to-play";
   const playedMs = Number(raw.playedMs);
@@ -655,6 +659,10 @@ function sortEntries(list) {
   });
 }
 
+function clockLabel(entry, now) {
+  return "end  " + formatClock(liveMs(entry, now));
+}
+
 function coverMarkup(entry) {
   if (entry.cover) {
     return '<img alt="" src="' + esc(entry.cover) + '" referrerpolicy="no-referrer" />' +
@@ -688,7 +696,7 @@ function cardMarkup(entry) {
       '<button type="button" data-act="commit-time">set</button></span>';
   }
   let session = live
-    ? '<button type="button" class="session is-live" data-act="session" data-clock="' + esc(entry.id) + '"><i class="live-pip" aria-hidden="true"></i>end  ' + esc(formatClock(liveMs(entry, now))) + "</button>"
+    ? '<button type="button" class="session is-live" data-act="session" data-clock="' + esc(entry.id) + '"><i class="live-pip" aria-hidden="true"></i><span class="clock-read">' + esc(clockLabel(entry, now)) + "</span></button>"
     : '<button type="button" class="session" data-act="session">start</button>';
   if (pendingEndId === entry.id && live) {
     session = '<div class="confirm-row"><p>add ' + esc(formatPlayed(liveMs(entry, now))) + '?</p>' +
@@ -786,7 +794,13 @@ function tickClocks() {
   document.querySelectorAll("[data-clock]").forEach((node) => {
     const entry = entryById(node.dataset.clock);
     if (!entry || !entry.sessionStart || pendingEndId === entry.id) return;
-    node.innerHTML = '<i class="live-pip" aria-hidden="true"></i>end  ' + esc(formatClock(liveMs(entry, now)));
+    const label = clockLabel(entry, now);
+    const text = node.querySelector(".clock-read");
+    if (text) {
+      if (text.textContent !== label) text.textContent = label;
+      return;
+    }
+    node.textContent = label;
   });
 }
 
@@ -853,7 +867,7 @@ function commitTitle(input) {
   const entry = entryById(article && article.dataset.id);
   if (!entry || editingTitleId !== entry.id) return;
   titleCommit = true;
-  const next = input.value.trim().replace(/\s+/g, " ").slice(0, 180);
+  const next = tidyTitle(input.value);
   editingTitleId = null;
   if (!next || next === entry.title) {
     render();
@@ -1032,7 +1046,7 @@ function onCardClick(event) {
 }
 
 function addTitle(title) {
-  const clean = title.trim().replace(/\s+/g, " ").slice(0, 180);
+  const clean = tidyTitle(title);
   if (!clean) return;
   const entry = cleanEntry({
     id: uid(),

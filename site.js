@@ -2,6 +2,14 @@ const WHEEL = ["themes", "github", "x", "mail"];
 const THEMES = ["darcula", "day", "string", "number", "function", "select"];
 const THEME_KEY = "pilgrimage-theme";
 
+const EYE = [["55.4","40.0"],["43.6","43.1"],["51.0","33.7"],["59.2","46.4"],["31.9","38.3"],["68.2","33.8"],["43.6","52.8"],["37.1","26.7"],["55.1","41.0"],["42.0","41.8"],["55.0","34.3"],["54.5","47.7"],["34.1","35.1"],["71.1","37.5"],["35.7","50.8"],["46.4","25.1"],["54.1","41.9"],["41.4","40.2"],["58.4","35.5"],["49.3","48.1"],["38.2","32.5"],["71.4","41.5"],["29.6","47.6"],["56.2","25.4"],["52.7","42.5"],["41.8","38.6"],["60.8","37.3"],["44.2","47.4"],["43.8","30.8"],["69.1","45.4"],["26.0","43.4"],["65.2","27.4"],["50.9","42.8"],["43.2","37.2"],["61.8","39.5"],["39.7","45.9"],["50.1","30.2"],["64.5","48.5"],["25.3","38.8"],["72.4","30.9"],["49.0","42.8"],["45.4","36.1"],["61.5","41.7"],["36.5","43.7"],["56.4","30.8"],["58.1","50.7"],["27.6","34.3"],["76.8","35.6"],["47.3","42.5"],["48.2","35.5"],["59.7","43.7"],["35.0","41.0"],["61.9","32.5"],["50.8","51.5"],["32.6","30.6"],["78.0","40.8"],["45.8","41.8"],["51.2","35.4"],["56.7","45.2"],["35.3","38.2"],["66.0","35.2"],["43.3","51.0"],["39.7","27.9"],["75.9","45.8"],["44.9","41.0"],["54.1","35.9"],["53.0","46.1"],["37.3","35.6"],["68.1","38.4"],["36.7","49.1"],["48.1","26.8"],["70.5","50.2"]];
+function paintEye() {
+  const host = document.getElementById("eye-dots");
+  if (!host) return;
+  host.innerHTML = EYE.map((dot) => '<circle cx="' + dot[0] + '" cy="' + dot[1] + '" r="0.55"/>').join("");
+}
+
+
 function mulberry32(seed) {
   let a = seed;
   return () => {
@@ -60,6 +68,33 @@ let seenPointer = false;
 let reduced = false;
 
 function $(id) { return document.getElementById(id); }
+const mouthEl = $("worm-mouth");
+const echoLine = $("echo-line");
+const eyeFrame = $("eye-frame");
+const eyeMark = $("eye-sq");
+const stageEl = document.querySelector(".stage");
+const sauronEl = $("sauron");
+const sauronArt = $("sauron-art");
+let liveSegs = SEG_COUNT;
+let statsDirty = false;
+let boxes = null;
+let frame = 0;
+
+function layoutBoxes() {
+  boxes = {
+    eye: eyeFrame ? eyeFrame.getBoundingClientRect() : null,
+    sauron: sauronEl ? sauronEl.getBoundingClientRect() : null,
+    stage: stageEl ? stageEl.getBoundingClientRect() : null,
+  };
+}
+function requestTick() {
+  if (frame) return;
+  frame = requestAnimationFrame(loop);
+}
+if (window.ResizeObserver) {
+  const boxesObserver = new ResizeObserver(() => { boxes = null; });
+  [sauronEl, eyeFrame, stageEl].forEach((node) => { if (node) boxesObserver.observe(node); });
+}
 function text(id, value) {
   const node = $(id);
   if (node && node.textContent !== value) node.textContent = value;
@@ -80,7 +115,7 @@ function cycleTheme() {
   setTheme(THEMES[(index + 1) % THEMES.length]);
 }
 function grownStats() {
-  const live = document.querySelectorAll(".seg:not(.eaten)").length;
+  const live = liveSegs;
   const ratio = SEG_COUNT === 0 ? 1 : live / SEG_COUNT;
   text("stat-cuts", String(SEG_COUNT - live));
   text("stat-members", String(SEG_COUNT));
@@ -93,7 +128,7 @@ function grownStats() {
 function pulse() {
   const now = performance.now();
   while (eats.length && now - eats[0] > 8000) eats.shift();
-  const poly = $("echo-line");
+  const poly = echoLine;
   if (!poly) return;
   const buckets = 18;
   const counts = Array.from({ length: buckets }, () => 0);
@@ -112,36 +147,46 @@ function devour(node) {
   const target = node && node.closest ? node.closest(".glyph, .seg") : null;
   if (!target || target.classList.contains("eaten") || target.closest(".no-bite")) return;
   target.classList.add("eaten");
+  const isSeg = target.classList.contains("seg");
+  if (isSeg) {
+    liveSegs -= 1;
+    statsDirty = true;
+  }
   eaten += 1;
   eats.push(performance.now());
-  $("worm-mouth")?.classList.add("feeding");
+  mouthEl?.classList.add("feeding");
   const previous = RESTORE.get(target);
   if (previous) window.clearTimeout(previous);
   const order = Number(target.dataset.order || 0);
-  const wait = target.classList.contains("seg") ? 700 + order * 22 : 1600 + Math.random() * 1200;
+  const wait = isSeg ? 700 + order * 22 : 1600 + Math.random() * 1200;
   RESTORE.set(target, window.setTimeout(() => {
     target.classList.remove("eaten");
     RESTORE.delete(target);
-    if (target.classList.contains("seg")) grownStats();
+    if (!isSeg) return;
+    liveSegs += 1;
+    grownStats();
   }, reduced ? 400 : wait));
-  if (target.classList.contains("seg")) grownStats();
+  requestTick();
 }
 function sample(x, y) {
   const radius = 11;
   const points = [[0, 0], [radius, 0], [-radius, 0], [0, radius], [0, -radius], [radius * 0.7, radius * 0.7], [-radius * 0.7, radius * 0.7]];
   for (const [dx, dy] of points) devour(document.elementFromPoint(x + dx, y + dy));
+  if (!statsDirty) return;
+  statsDirty = false;
+  grownStats();
 }
 function placeEye() {
-  const frame = $("eye-frame");
-  const mark = $("eye-sq");
-  if (!frame || !mark || !hasPointer) return;
-  const rect = frame.getBoundingClientRect();
-  if (!rect.width) return;
+  if (!eyeFrame || !eyeMark || !hasPointer) return;
+  if (!boxes) layoutBoxes();
+  const rect = boxes.eye;
+  if (!rect || !rect.width) return;
   const nx = (pointerX - rect.left) / rect.width;
   const ny = (pointerY - rect.top) / rect.height;
   const x = Math.max(6, Math.min(86, nx * 70 + 8));
   const y = Math.max(8, Math.min(62, ny * 40 + 14));
-  mark.setAttribute("transform", "translate(" + x.toFixed(1) + " " + y.toFixed(1) + ")");
+  const next = "translate(" + x.toFixed(1) + " " + y.toFixed(1) + ")";
+  if (eyeMark.getAttribute("transform") !== next) eyeMark.setAttribute("transform", next);
 }
 
 const SAURON = [
@@ -209,12 +254,11 @@ function paintSauron(ax, ay) {
 }
 
 function placeSauron() {
-  const node = $("sauron");
-  const art = $("sauron-art");
-  if (!node || !art || !IRIS.length) return;
-  if (!art.innerHTML) art.innerHTML = paintSauron(aimX, aimY);
-  const rect = node.getBoundingClientRect();
-  if (!rect.width) return;
+  if (!sauronEl || !sauronArt || !IRIS.length) return false;
+  if (!sauronArt.innerHTML) sauronArt.innerHTML = paintSauron(aimX, aimY);
+  if (!boxes) layoutBoxes();
+  const rect = boxes.sauron;
+  if (!rect || !rect.width) return false;
   const cx = rect.left + rect.width * 0.5;
   const cy = rect.top + rect.height * 0.52;
   const midX = (IRIS_XS[0] + IRIS_XS[IRIS_XS.length - 1]) / 2;
@@ -240,35 +284,36 @@ function placeSauron() {
   aimY += (ty - aimY) * k;
   leanX += (lx - leanX) * k;
   leanY += (ly - leanY) * k;
-  if (reduced) art.style.transform = "";
-  else art.style.transform = "translate(" + leanX.toFixed(2) + "px," + leanY.toFixed(2) + "px) rotate(" + (leanX * 0.42).toFixed(2) + "deg)";
+  if (reduced) sauronArt.style.transform = "";
+  else sauronArt.style.transform = "translate(" + leanX.toFixed(2) + "px," + leanY.toFixed(2) + "px) rotate(" + (leanX * 0.42).toFixed(2) + "deg)";
   const key = Math.round(aimX) + ":" + Math.round(aimY);
   if (key !== slitKey) {
     slitKey = key;
-    art.innerHTML = paintSauron(aimX, aimY);
+    sauronArt.innerHTML = paintSauron(aimX, aimY);
   }
+  return Math.abs(tx - aimX) > 0.08 || Math.abs(ty - aimY) > 0.08 || Math.abs(lx - leanX) > 0.2 || Math.abs(ly - leanY) > 0.2;
 }
 
 function tick() {
-  const mouth = $("worm-mouth");
-  if (!mouth) return;
+  if (!mouthEl) return false;
   const k = reduced ? 1 : 0.22;
   mouthX += (pointerX - mouthX) * k;
   mouthY += (pointerY - mouthY) * k;
-  mouth.style.transform = "translate(" + mouthX + "px, " + mouthY + "px)";
-  if (hasPointer) mouth.classList.add("live");
-  mouth.classList.toggle("ghost", !hasPointer);
+  mouthEl.style.transform = "translate(" + mouthX + "px, " + mouthY + "px)";
+  if (hasPointer) mouthEl.classList.add("live");
+  mouthEl.classList.toggle("ghost", !hasPointer);
   const speed = Math.hypot(pointerX - mouthX, pointerY - mouthY);
   if (hasPointer && speed > 0.7) sample(mouthX, mouthY);
-  const stage = document.querySelector(".stage");
-  if (stage && hasPointer) {
-    const rect = stage.getBoundingClientRect();
-    text("hand-readout", ((pointerX - rect.left) / Math.max(1, rect.width)).toFixed(2) + "  " + ((pointerY - rect.top) / Math.max(1, rect.height)).toFixed(2));
+  if (!boxes) layoutBoxes();
+  const stage = boxes.stage;
+  if (stage && hasPointer && stage.width) {
+    text("hand-readout", ((pointerX - stage.left) / Math.max(1, stage.width)).toFixed(2) + "  " + ((pointerY - stage.top) / Math.max(1, stage.height)).toFixed(2));
   } else {
     text("hand-readout", "—  —");
   }
   placeEye();
-  placeSauron();
+  const sauronMoving = placeSauron();
+  return speed > 0.45 || sauronMoving;
 }
 function arc(t) {
   const bulge = Math.sin(Math.max(0, Math.min(1, t)) * Math.PI);
@@ -286,12 +331,11 @@ function startWheel() {
   const arcPath = document.getElementById("wheel-arc");
   let offset = 1.5;
   let drag = null;
-  const horizontal = () => window.matchMedia("(max-width: 860px)").matches;
+  const mobileQuery = window.matchMedia("(max-width: 860px)");
+  const horizontal = () => mobileQuery.matches;
   const paint = () => {
     const mobile = horizontal();
     const spacing = mobile ? 0.22 : 0.24;
-    let hot = 0;
-    let hotDist = Infinity;
     cards.forEach((card, index) => {
       if (mobile) {
         card.style.transform = "";
@@ -318,7 +362,6 @@ function startWheel() {
       card.style.zIndex = String(20 - Math.round(dist));
       card.classList.toggle("is-hot", focus);
       card.style.opacity = String(Math.max(0.35, 1 - dist * 0.16));
-      if (dist < hotDist) { hotDist = dist; hot = index; }
     });
     if (mobile) {
       const mid = root.scrollLeft + root.clientWidth / 2;
@@ -343,8 +386,6 @@ function startWheel() {
       }
     }
     root.dataset.ready = "1";
-    void hot;
-    void WHEEL;
   };
   root.addEventListener("wheel", (event) => {
     if (horizontal()) return;
@@ -378,7 +419,10 @@ function startWheel() {
     event.preventDefault();
     event.stopPropagation();
   }, true);
-  window.addEventListener("resize", paint);
+  window.addEventListener("resize", () => {
+    boxes = null;
+    paint();
+  });
   paint();
 }
 
@@ -386,6 +430,7 @@ const savedTheme = document.documentElement.getAttribute("data-theme");
 if (THEMES.indexOf(savedTheme) !== -1) theme = savedTheme;
 reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 paintThemeButtons();
+paintEye();
 grownStats();
 pulse();
 startWheel();
@@ -412,6 +457,7 @@ window.addEventListener("pointermove", (event) => {
     const t = i / steps;
     sample(prevX + (pointerX - prevX) * t, prevY + (pointerY - prevY) * t);
   }
+  requestTick();
 }, { passive: true });
 window.addEventListener("pointerdown", (event) => {
   pointerX = event.clientX;
@@ -422,8 +468,12 @@ window.addEventListener("pointerdown", (event) => {
     mouthX = pointerX;
     mouthY = pointerY;
   }
+  requestTick();
 }, { passive: true });
-const onLeave = () => { hasPointer = false; };
+const onLeave = () => {
+  hasPointer = false;
+  requestTick();
+};
 document.documentElement.addEventListener("pointerleave", onLeave);
 window.addEventListener("blur", onLeave);
 window.addEventListener("keydown", (event) => {
@@ -435,13 +485,14 @@ window.addEventListener("keydown", (event) => {
   }
 });
 let lastPulse = 0;
-const loop = (now) => {
-  tick();
-  if (now - lastPulse > 240) {
+function loop(now) {
+  frame = 0;
+  const moving = tick();
+  if (eats.length && now - lastPulse > 240) {
     lastPulse = now;
     pulse();
-    if (!document.querySelector(".glyph.eaten, .seg.eaten")) $("worm-mouth")?.classList.remove("feeding");
   }
-  requestAnimationFrame(loop);
-};
-requestAnimationFrame(loop);
+  if (RESTORE.size === 0) mouthEl?.classList.remove("feeding");
+  if (moving || eats.length) requestTick();
+}
+requestTick();
