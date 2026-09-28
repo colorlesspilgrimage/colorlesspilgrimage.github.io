@@ -13,11 +13,9 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/log/log.css" />
+    <script src="/theme.js"></script>
     <script>
       try {
-        var saved = localStorage.getItem("pilgrimage-theme");
-        var known = ["darcula", "day", "string", "number", "function", "select"];
-        if (saved && known.indexOf(saved) !== -1) document.documentElement.setAttribute("data-theme", saved);
         if (sessionStorage.getItem("pilgrimage-log-open") === "1" || localStorage.getItem("pilgrimage-log-keep") === "1") {
           document.documentElement.classList.add("log-open");
         }
@@ -65,10 +63,22 @@
         <div class="io">
           <button type="button" id="export">export</button>
           <label class="file">import<input id="import" type="file" accept="application/json,.json" /></label>
+          <button type="button" id="backup">backup</button>
+          <button type="button" id="rekey">passphrase</button>
           <button type="button" id="lock">lock</button>
         </div>
       </div>
-      <p class="ledger-note">server copy is encrypted with the passphrase.</p>
+      <form id="rekey-form" class="rekey is-off">
+        <label class="sr" for="rekey-now">current passphrase</label>
+        <input id="rekey-now" type="password" placeholder="current" autocomplete="current-password" required />
+        <label class="sr" for="rekey-next">new passphrase</label>
+        <input id="rekey-next" type="password" placeholder="new" autocomplete="new-password" required />
+        <label class="sr" for="rekey-again">new passphrase again</label>
+        <input id="rekey-again" type="password" placeholder="again" autocomplete="new-password" required />
+        <button type="submit">change</button>
+        <p id="rekey-msg" class="gate-msg" role="status"></p>
+      </form>
+      <p class="ledger-note">server copy is encrypted with the passphrase. backup downloads it as vault.json to commit under log/.</p>
       <p id="sync" class="sync">server</p>
       <div id="groups"></div>
     </main>

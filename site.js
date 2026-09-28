@@ -1,6 +1,4 @@
 const WHEEL = ["themes", "github", "x", "mail"];
-const THEMES = ["darcula", "day", "string", "number", "function", "select"];
-const THEME_KEY = "pilgrimage-theme";
 
 const EYE = [["55.4","40.0"],["43.6","43.1"],["51.0","33.7"],["59.2","46.4"],["31.9","38.3"],["68.2","33.8"],["43.6","52.8"],["37.1","26.7"],["55.1","41.0"],["42.0","41.8"],["55.0","34.3"],["54.5","47.7"],["34.1","35.1"],["71.1","37.5"],["35.7","50.8"],["46.4","25.1"],["54.1","41.9"],["41.4","40.2"],["58.4","35.5"],["49.3","48.1"],["38.2","32.5"],["71.4","41.5"],["29.6","47.6"],["56.2","25.4"],["52.7","42.5"],["41.8","38.6"],["60.8","37.3"],["44.2","47.4"],["43.8","30.8"],["69.1","45.4"],["26.0","43.4"],["65.2","27.4"],["50.9","42.8"],["43.2","37.2"],["61.8","39.5"],["39.7","45.9"],["50.1","30.2"],["64.5","48.5"],["25.3","38.8"],["72.4","30.9"],["49.0","42.8"],["45.4","36.1"],["61.5","41.7"],["36.5","43.7"],["56.4","30.8"],["58.1","50.7"],["27.6","34.3"],["76.8","35.6"],["47.3","42.5"],["48.2","35.5"],["59.7","43.7"],["35.0","41.0"],["61.9","32.5"],["50.8","51.5"],["32.6","30.6"],["78.0","40.8"],["45.8","41.8"],["51.2","35.4"],["56.7","45.2"],["35.3","38.2"],["66.0","35.2"],["43.3","51.0"],["39.7","27.9"],["75.9","45.8"],["44.9","41.0"],["54.1","35.9"],["53.0","46.1"],["37.3","35.6"],["68.1","38.4"],["36.7","49.1"],["48.1","26.8"],["70.5","50.2"]];
 function paintEye() {
@@ -55,9 +53,8 @@ if (rootSegs) {
   rootSegs.innerHTML = SEGMENTS.map((seg) => '<g class="seg" data-order="' + seg.order + '"><path class="seg-hit" d="' + seg.d + '"/><path class="seg-line" d="' + seg.d + '"/></g>').join("");
 }
 
-const RESTORE = new WeakMap();
+let regrowing = 0;
 const eats = [];
-let theme = "darcula";
 let mouthX = 0;
 let mouthY = 0;
 let pointerX = 0;
@@ -117,21 +114,6 @@ function text(id, value) {
   }
   if (node && node.textContent !== value) node.textContent = value;
 }
-function paintThemeButtons() {
-  document.querySelectorAll("[data-theme-id]").forEach((node) => {
-    node.setAttribute("aria-pressed", node.dataset.themeId === theme ? "true" : "false");
-  });
-}
-function setTheme(next) {
-  theme = next;
-  document.documentElement.setAttribute("data-theme", next);
-  try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
-  paintThemeButtons();
-}
-function cycleTheme() {
-  const index = THEMES.indexOf(theme);
-  setTheme(THEMES[(index + 1) % THEMES.length]);
-}
 function grownStats(full) {
   const ratio = SEG_COUNT === 0 ? 1 : liveSegs / SEG_COUNT;
   const pct = Math.round(ratio * 100) + "%";
@@ -176,17 +158,17 @@ function devour(node) {
     mouthFeeding = true;
     mouthEl.classList.add("feeding");
   }
-  const previous = RESTORE.get(target);
-  if (previous) window.clearTimeout(previous);
+  regrowing += 1;
   const order = Number(target.dataset.order || 0);
   const wait = isSeg ? 700 + order * 22 : 1600 + Math.random() * 1200;
-  RESTORE.set(target, window.setTimeout(() => {
+  window.setTimeout(() => {
     target.classList.remove("eaten");
-    RESTORE.delete(target);
+    regrowing -= 1;
+    if (regrowing === 0) requestTick();
     if (!isSeg) return;
     liveSegs += 1;
     grownStats();
-  }, reduced ? 400 : wait));
+  }, reduced ? 400 : wait);
   requestTick();
 }
 function inTerm(x, y) {
@@ -489,19 +471,11 @@ function startWheel() {
   paint();
 }
 
-const savedTheme = document.documentElement.getAttribute("data-theme");
-if (THEMES.indexOf(savedTheme) !== -1) theme = savedTheme;
 reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-paintThemeButtons();
 paintEye();
 grownStats(true);
 pulse();
 startWheel();
-document.querySelectorAll("[data-theme-id]").forEach((node) => {
-  node.addEventListener("click", () => {
-    if (THEMES.indexOf(node.dataset.themeId) !== -1) setTheme(node.dataset.themeId);
-  });
-});
 window.addEventListener("pointermove", (event) => {
   const prevX = pointerX;
   const prevY = pointerY;
@@ -542,14 +516,6 @@ const onLeave = () => {
 };
 document.documentElement.addEventListener("pointerleave", onLeave);
 window.addEventListener("blur", onLeave);
-window.addEventListener("keydown", (event) => {
-  const tag = event.target && event.target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA") return;
-  if ((event.key === "t" || event.key === "T") && !event.metaKey && !event.ctrlKey && !event.altKey) {
-    event.preventDefault();
-    cycleTheme();
-  }
-});
 let lastPulse = 0;
 function loop(now) {
   frame = 0;
@@ -559,7 +525,7 @@ function loop(now) {
     lastPulse = now;
     pulse();
   }
-  if (mouthFeeding && RESTORE.size === 0 && mouthEl) {
+  if (mouthFeeding && regrowing === 0 && mouthEl) {
     mouthFeeding = false;
     mouthEl.classList.remove("feeding");
   }

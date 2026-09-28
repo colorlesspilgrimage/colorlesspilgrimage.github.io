@@ -11,13 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
-    <script>
-      try {
-        var saved = localStorage.getItem("pilgrimage-theme");
-        var known = ["darcula", "day", "string", "number", "function", "select"];
-        if (saved && known.indexOf(saved) !== -1) document.documentElement.setAttribute("data-theme", saved);
-      } catch (e) {}
-    </script>
+    <script src="/theme.js"></script>
   </head>
   <body>
     <div class="desk">

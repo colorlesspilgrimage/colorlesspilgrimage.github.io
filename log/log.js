@@ -1,13 +1,12 @@
-// GATE is sha256 of the passphrase. Rotate the hash; do not write the phrase here.
-const GATE = "aa2f27c9fc8e897a43af876b8050c834b77c2379356f746c1f272c09e73658a8";
 const STORE = "pilgrimage-log";
 const OPEN_KEY = "pilgrimage-log-open";
 const KEEP_KEY = "pilgrimage-log-keep";
-const PHRASE_KEY = "pilgrimage-log-phrase";
-const THEME_KEY = "pilgrimage-theme";
+const VAULT_KEY = "pilgrimage-log-vault";
+const KEY_DB = "pilgrimage-log";
 const RENTRY = "cp-log-vault";
 const KDF_ITERS = 210000;
-const THEMES = ["darcula", "day", "string", "number", "function", "select"];
+const EDIT_SALT = "pilgrimage-log-edit-v3";
+const MIN_PHRASE = 12;
 const STATUSES = ["playing", "to-play", "played"];
 const STATUS_LABEL = { playing: "playing", "to-play": "to play", played: "played" };
 const LONG_SESSION = 6 * 60 * 60 * 1000;
@@ -24,7 +23,11 @@ let focusTime = false;
 let titleCommit = false;
 const lookupGen = new Map();
 const probeCache = new Map();
-let phrase = "";
+// { key, salt, iter, editCode, phrase, legacy }. phrase is "" unless typed on this page load; it is never stored.
+let session = null;
+let backupCanon = null;
+let rekeying = false;
+let gateBusy = false;
 let sawRemote = false;
 let pushTimer = 0;
 let pushing = false;
@@ -210,11 +213,6 @@ function entryById(id) {
   return state.entries.find((entry) => entry.id === id) || null;
 }
 
-async function sha256(text) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 function hashesEqual(a, b) {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -238,43 +236,100 @@ function b64ToBytes(value) {
   return bytes;
 }
 
-function utf8ToB64(text) {
-  return bytesToB64(new TextEncoder().encode(text));
+function toHex(bytes) {
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function deriveKey(passphrase, salt, iterations) {
-  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
-  const rounds = Math.max(100000, Math.min(600000, Number(iterations) || KDF_ITERS));
-  return crypto.subtle.deriveKey(
-    { name: "PBKDF2", salt, iterations: rounds, hash: "SHA-256" },
-    base,
+function kdfRounds(iterations) {
+  return Math.max(100000, Math.min(600000, Number(iterations) || KDF_ITERS));
+}
+
+function passKey(passphrase) {
+  return crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey", "deriveBits"]);
+}
+
+// Non-extractable, so a kept session can use the log without holding the passphrase.
+async function deriveKeyed(passphrase, salt, iterations) {
+  const iter = kdfRounds(iterations);
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: b64ToBytes(salt), iterations: iter, hash: "SHA-256" },
+    await passKey(passphrase),
     { name: "AES-GCM", length: 256 },
     false,
     ["encrypt", "decrypt"]
   );
+  return { key, salt, iter };
 }
 
-async function encryptVault(passphrase, obj) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
+function freshKeyed(passphrase) {
+  return deriveKeyed(passphrase, bytesToB64(crypto.getRandomValues(new Uint8Array(16))), KDF_ITERS);
+}
+
+// Guessing the passphrase from the edit code costs a full PBKDF2 run, same as from the vault.
+async function deriveEditCode(passphrase) {
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: new TextEncoder().encode(EDIT_SALT), iterations: KDF_ITERS, hash: "SHA-256" },
+    await passKey(passphrase),
+    64
+  );
+  return toHex(new Uint8Array(bits));
+}
+
+// Edit code of pastes written before deriveEditCode existed; used once to move such a paste over.
+async function legacyEditCode(passphrase) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("pilgrimage-log-edit-v2"));
+  return toHex(new Uint8Array(sig)).slice(0, 16);
+}
+
+function parseVault(text) {
+  const vault = JSON.parse(text);
+  if (!vault || vault.v !== 1 || typeof vault.salt !== "string" || typeof vault.iv !== "string" || typeof vault.data !== "string") {
+    throw new Error("vault");
+  }
+  return vault;
+}
+
+function sameKdf(keyed, vault) {
+  return keyed.salt === vault.salt && keyed.iter === kdfRounds(vault.iter);
+}
+
+// Pushes reuse the salt so one derived key keeps working; the IV is fresh every time.
+async function sealVault(keyed, obj) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(passphrase, salt, KDF_ITERS);
-  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify(obj)));
-  return {
+  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, keyed.key, new TextEncoder().encode(JSON.stringify(obj)));
+  return JSON.stringify({
     v: 1,
     kdf: "PBKDF2-SHA256",
-    iter: KDF_ITERS,
-    salt: bytesToB64(salt),
+    iter: keyed.iter,
+    salt: keyed.salt,
     iv: bytesToB64(iv),
     data: bytesToB64(new Uint8Array(cipher)),
-  };
+  });
 }
 
-async function decryptVault(passphrase, vault) {
-  if (!vault || vault.v !== 1 || !vault.salt || !vault.iv || !vault.data) throw new Error("vault");
-  const key = await deriveKey(passphrase, b64ToBytes(vault.salt), vault.iter);
+async function openVault(key, vault) {
   const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64ToBytes(vault.iv) }, key, b64ToBytes(vault.data));
   const data = JSON.parse(new TextDecoder().decode(plain));
   if (!data || !Array.isArray(data.entries)) throw new Error("vault");
+  return data;
+}
+
+// The server copy is under a key this session cannot follow: rentry refused the edit code, or the
+// vault was re-keyed and no passphrase was typed on this page load.
+class StaleKey extends Error {}
+
+// adopt: take the vault's salt as the session key, so later pushes stay readable by the stored key.
+async function unseal(text, adopt) {
+  const vault = parseVault(text);
+  if (sameKdf(session, vault)) return openVault(session.key, vault);
+  if (!session.phrase) throw new StaleKey("key");
+  const keyed = await deriveKeyed(session.phrase, vault.salt, vault.iter);
+  const data = await openVault(keyed.key, vault);
+  if (adopt) {
+    Object.assign(session, keyed);
+    await keepSession();
+  }
   return data;
 }
 
@@ -323,192 +378,269 @@ function mergeRemote(remote) {
   state.updatedAt = Math.max(Number(state.updatedAt) || 0, Number(remote.updatedAt) || 0);
 }
 
-async function hmacHex(passphrase, message) {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(passphrase),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
-  return [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function editCode(passphrase) {
-  return hmacHex(passphrase, "pilgrimage-log-edit-v2").then((hex) => hex.slice(0, 16));
-}
-
-function macVault(passphrase, vault) {
-  return hmacHex(passphrase, vault.salt + "." + vault.iv + "." + vault.data);
-}
-
 function setSync(text) {
   const node = $("sync");
   if (node) node.textContent = text;
 }
 
-function schedulePush() {
-  if (suspendPush || !phrase || !sawRemote) return;
-  window.clearTimeout(pushTimer);
-  pushTimer = window.setTimeout(() => { pushVault(); }, 1200);
-}
-
-async function readGitVault() {
-  const res = await fetch("/log/vault.json?t=" + Date.now(), { cache: "no-store" });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error("read");
-  return res.json();
-}
-
-async function readRentry() {
-  const res = await fetch("https://rentry.co/api/fetch/" + RENTRY, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ edit_code: await editCode(phrase) }),
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error("read");
-  const data = await res.json();
-  if (!data || String(data.status) !== "200" || !data.content || !data.content.text) return null;
-  return JSON.parse(data.content.text);
-}
-
-async function vaultPlain(json) {
-  if (!json) return null;
-  if (json.mac && !hashesEqual(await macVault(phrase, json), String(json.mac))) throw new Error("mac");
-  return decryptVault(phrase, json);
-}
-
-async function pullVault() {
-  if (!phrase) return;
-  setSync("server · reading");
-  let json = null;
-  let live = false;
-  try {
-    json = await readRentry();
-    live = true;
-  } catch (e) {
-    json = null;
-  }
-  if (!json) {
-    try {
-      json = await readGitVault();
-      live = false;
-    } catch (e) {
-      setSync("server · offline");
-      return;
-    }
-  }
-  sawRemote = true;
-  if (!json) {
-    setSync("server · empty");
-    if (state.entries.length) schedulePush();
-    return;
-  }
-  let plain;
-  try {
-    plain = await vaultPlain(json);
-  } catch (e) {
-    if (!live) {
-      setSync("server · locked");
-      return;
-    }
-    try {
-      plain = await vaultPlain(await readGitVault());
-    } catch (err) {
-      setSync("server · locked");
-      return;
-    }
-  }
-  if (!plain) {
-    setSync("server · empty");
-    if (state.entries.length) schedulePush();
-    return;
-  }
+function applyRemote(plain) {
   suspendPush = true;
   mergeRemote(plain);
   saveLocal();
   suspendPush = false;
   render();
+}
+
+function schedulePush() {
+  if (suspendPush || !session || !sawRemote) return;
+  window.clearTimeout(pushTimer);
+  pushTimer = window.setTimeout(() => { pushVault(); }, 1200);
+}
+
+function cachedVault() {
+  try {
+    return localStorage.getItem(VAULT_KEY);
+  } catch (e) {
+    return null;
+  }
+}
+
+function cacheVault(text) {
+  try {
+    localStorage.setItem(VAULT_KEY, text);
+  } catch (e) {}
+}
+
+async function readBackup() {
+  const res = await fetch("/log/vault.json?t=" + Date.now(), { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("read");
+  return res.text();
+}
+
+async function rentry(path, fields) {
+  const res = await fetch("https://rentry.co/api/" + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(fields),
+  });
+  const data = await res.json();
+  // rentry answers HTTP 200 and puts the real status in the body.
+  const status = String(data && data.status);
+  if (status === "400" && /edit code/i.test(String(data.errors || data.content))) throw new StaleKey("edit code");
+  return { status, content: data && data.content };
+}
+
+async function readRentry(code) {
+  const res = await rentry("fetch/" + RENTRY, { edit_code: code });
+  if (res.status === "404") return null;
+  if (res.status !== "200" || !res.content) throw new Error("read");
+  return res.content.text || null;
+}
+
+async function writeRentry(code, text, nextCode) {
+  const fields = { edit_code: code, text };
+  if (nextCode) fields.new_edit_code = nextCode;
+  let res = await rentry("edit/" + RENTRY, fields);
+  if (res.status === "404") res = await rentry("new", { url: RENTRY, edit_code: nextCode || code, text });
+  if (res.status !== "200") throw new Error("write");
+}
+
+async function remoteText() {
+  try {
+    return await readRentry(session.editCode);
+  } catch (e) {
+    if (!(e instanceof StaleKey) || !session.phrase || !session.legacy) throw e;
+    const old = await legacyEditCode(session.phrase);
+    const text = await readRentry(old);
+    if (text !== null) await writeRentry(old, text, session.editCode);
+    session.legacy = false;
+    return text;
+  }
+}
+
+// Flags the committed log/vault.json when it no longer matches the pile.
+async function markSaved(current) {
+  setSync("server · saved");
+  if (backupCanon === null) {
+    backupCanon = "";
+    try {
+      const text = await readBackup();
+      if (text) backupCanon = canon(await unseal(text, false));
+    } catch (e) {}
+  }
+  if (session !== current || !$("sync").textContent.startsWith("server · saved")) return;
+  setSync(backupCanon === canon(snapshot()) ? "server · saved" : "server · saved · backup behind");
+}
+
+// rentry is unreachable: fold in the committed copy so a fresh browser still gets the pile.
+async function pullBackup(current) {
+  try {
+    const text = await readBackup();
+    const plain = text ? await unseal(text, false) : null;
+    if (plain && session === current) applyRemote(plain);
+  } catch (e) {}
+  if (session !== current) return;
+  sawRemote = true;
+  setSync("server · offline");
+}
+
+async function pullVault() {
+  const current = session;
+  if (!current) return;
+  setSync("server · reading");
+  let plain = null;
+  try {
+    const text = await remoteText();
+    if (session !== current) return;
+    sawRemote = true;
+    if (!text) {
+      setSync("server · empty");
+      if (state.entries.length) schedulePush();
+      return;
+    }
+    plain = await unseal(text, true);
+    if (session !== current) return;
+    cacheVault(text);
+  } catch (e) {
+    if (session !== current) return;
+    if (e instanceof StaleKey) relock();
+    else if (sawRemote) setSync("server · unreadable");
+    else await pullBackup(current);
+    return;
+  }
+  applyRemote(plain);
   if (canon(snapshot()) !== canon(plain)) schedulePush();
-  else setSync("server · saved");
+  else markSaved(current);
 }
 
 async function pushVault() {
-  if (!phrase || !sawRemote || pushing) return;
+  const current = session;
+  if (!current || !sawRemote || pushing) return;
   pushing = true;
+  let retry = false;
   setSync("server · writing");
   try {
-    const remote = await readRentry();
-    if (remote) {
-      const plain = await vaultPlain(remote);
-      if (plain && canon(snapshot()) !== canon(plain)) {
-        suspendPush = true;
-        mergeRemote(plain);
+    const text = await remoteText();
+    if (text) {
+      const plain = await unseal(text, true);
+      if (session !== current) return;
+      if (canon(snapshot()) !== canon(plain)) {
+        applyRemote(plain);
         state.updatedAt = Date.now();
         saveLocal();
-        suspendPush = false;
-        render();
       }
     }
-    const vault = await encryptVault(phrase, snapshot());
-    vault.mac = await macVault(phrase, vault);
-    const body = new URLSearchParams({
-      edit_code: await editCode(phrase),
-      text: JSON.stringify(vault),
-    });
-    let res = await fetch("https://rentry.co/api/edit/" + RENTRY, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
-    });
-    if (res.status === 404) {
-      body.set("url", RENTRY);
-      res = await fetch("https://rentry.co/api/new", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body,
-      });
-    }
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data || String(data.status) !== "200") throw new Error("write");
+    const sealed = await sealVault(current, snapshot());
+    await writeRentry(current.editCode, sealed);
+    if (session !== current) return;
+    cacheVault(sealed);
     pushTries = 0;
-    setSync("server · saved");
+    markSaved(current);
   } catch (e) {
-    if (pushTries < 2) {
+    if (session !== current) return;
+    if (e instanceof StaleKey) relock();
+    else if (pushTries < 2) {
       pushTries += 1;
-      pushing = false;
-      schedulePush();
-      return;
-    }
-    setSync("server · not written");
+      retry = true;
+    } else setSync("server · not written");
+  } finally {
+    pushing = false;
+    if (retry) schedulePush();
   }
-  pushing = false;
 }
 
-function rememberPhrase(text, keep) {
-  phrase = text;
+function keyStore(mode, run) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(KEY_DB, 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("session");
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction("session", mode);
+      const req = run(tx.objectStore("session"));
+      tx.oncomplete = () => {
+        db.close();
+        resolve(req.result);
+      };
+      tx.onabort = () => {
+        db.close();
+        reject(tx.error);
+      };
+    };
+  });
+}
+
+async function keepSession() {
+  if (!session) return;
+  const { key, salt, iter, editCode } = session;
   try {
-    sessionStorage.setItem(PHRASE_KEY, text);
-    if (keep) localStorage.setItem(PHRASE_KEY, text);
-    else localStorage.removeItem(PHRASE_KEY);
+    await keyStore("readwrite", (store) => store.put({ key, salt, iter, editCode }, "current"));
   } catch (e) {}
 }
 
-function forgetPhrase() {
-  phrase = "";
+// Unlocking opens a vault reachable without rentry, so a mistyped passphrase never spends one of
+// rentry's few edit-code attempts. Returns the session key, "no", or "offline".
+async function unlockKeyed(passphrase) {
+  const texts = [];
+  const cached = cachedVault();
+  if (cached) texts.push(cached);
+  let reachable = true;
   try {
-    sessionStorage.removeItem(PHRASE_KEY);
-    localStorage.removeItem(PHRASE_KEY);
-  } catch (e) {}
-}
-
-function storedPhrase() {
-  try {
-    return sessionStorage.getItem(PHRASE_KEY) || localStorage.getItem(PHRASE_KEY) || "";
+    const backup = await readBackup();
+    if (backup) texts.push(backup);
   } catch (e) {
-    return "";
+    reachable = false;
+  }
+  const tried = new Set();
+  for (const text of texts) {
+    let vault;
+    try {
+      vault = parseVault(text);
+    } catch (e) {
+      continue;
+    }
+    const id = vault.salt + ":" + kdfRounds(vault.iter);
+    if (tried.has(id)) continue;
+    tried.add(id);
+    try {
+      const keyed = await deriveKeyed(passphrase, vault.salt, vault.iter);
+      await openVault(keyed.key, vault);
+      // Only the old build wrote a mac, and its paste still takes the HMAC edit code.
+      keyed.legacy = "mac" in vault;
+      return keyed;
+    } catch (e) {}
+  }
+  if (tried.size) return "no";
+  if (!reachable) return "offline";
+  // No vault exists yet: this passphrase starts one.
+  return freshKeyed(passphrase);
+}
+
+async function changePhrase(currentPhrase, nextPhrase) {
+  const current = session;
+  if (!hashesEqual(await deriveEditCode(currentPhrase), current.editCode)) throw new Error("current");
+  current.phrase = currentPhrase;
+  window.clearTimeout(pushTimer);
+  pushing = true;
+  try {
+    // Merge the server copy first so the rewrite drops nothing.
+    const text = await remoteText();
+    if (text) applyRemote(await unseal(text, true));
+    const keyed = await freshKeyed(nextPhrase);
+    const editCode = await deriveEditCode(nextPhrase);
+    const sealed = await sealVault(keyed, snapshot());
+    if (session !== current) throw new Error("locked");
+    await writeRentry(current.editCode, sealed, editCode);
+    session = { ...keyed, editCode, phrase: nextPhrase, legacy: false };
+    sawRemote = true;
+    backupCanon = "";
+    cacheVault(sealed);
+    await keepSession();
+    download("vault.json", sealed);
+    markSaved(session);
+  } finally {
+    pushing = false;
   }
 }
 
@@ -937,17 +1069,55 @@ function lock() {
     sessionStorage.removeItem(OPEN_KEY);
     localStorage.removeItem(KEEP_KEY);
   } catch (e) {}
-  forgetPhrase();
+  session = null;
+  sawRemote = false;
+  backupCanon = null;
+  window.clearTimeout(pushTimer);
+  keyStore("readwrite", (store) => store.delete("current")).catch(() => {});
+  $("rekey-form").reset();
+  $("rekey-form").classList.add("is-off");
+  $("rekey-msg").textContent = "";
+  setSync("server");
   showGate();
 }
 
-function openLog(keep, text) {
+// The server copy moved to a key this session cannot follow. Drop the cached copy too, or the
+// old passphrase would keep opening it.
+function relock() {
+  try {
+    localStorage.removeItem(VAULT_KEY);
+  } catch (e) {}
+  lock();
+  $("gate-msg").textContent = "the passphrase changed. enter the current one.";
+}
+
+function openLog(keep, next) {
   try {
     sessionStorage.setItem(OPEN_KEY, "1");
     if (keep) localStorage.setItem(KEEP_KEY, "1");
     else localStorage.removeItem(KEEP_KEY);
   } catch (e) {}
-  rememberPhrase(text, keep);
+  session = next;
+  sawRemote = false;
+  backupCanon = null;
+  pushTries = 0;
+  keepSession();
+  showBoard();
+  pullVault();
+}
+
+async function restore() {
+  let saved = null;
+  if (isOpen()) {
+    try {
+      saved = await keyStore("readonly", (store) => store.get("current"));
+    } catch (e) {}
+  }
+  if (!saved || !saved.key) {
+    lock();
+    return;
+  }
+  session = { key: saved.key, salt: saved.salt, iter: saved.iter, editCode: saved.editCode, phrase: "", legacy: false };
   showBoard();
   pullVault();
 }
@@ -1093,13 +1263,21 @@ function addTitle(title) {
   attachArt(entry.id, entry.title);
 }
 
-function exportPile() {
-  const blob = new Blob([JSON.stringify({ version: 1, entries: state.entries }, null, 2)], { type: "application/json" });
+function download(name, text) {
   const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = "pilgrimage-log.json";
+  link.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  link.download = name;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function exportPile() {
+  download("pilgrimage-log.json", JSON.stringify({ version: 1, entries: state.entries }, null, 2));
+}
+
+async function backupVault() {
+  if (!session) return;
+  download("vault.json", await sealVault(session, snapshot()));
 }
 
 async function importPile(file) {
@@ -1121,35 +1299,70 @@ async function importPile(file) {
   render();
 }
 
-function setTheme(next) {
-  document.documentElement.setAttribute("data-theme", next);
-  try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
-}
-
-function cycleTheme() {
-  const current = document.documentElement.getAttribute("data-theme") || "darcula";
-  const index = THEMES.indexOf(current);
-  setTheme(THEMES[(index + 1) % THEMES.length]);
-}
-
 $("gate-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (gateBusy) return;
   const pass = $("pass");
   const msg = $("gate-msg");
   const phrase = pass.value.trim();
-  msg.textContent = "";
   if (!phrase || !crypto.subtle) {
     msg.textContent = "no.";
     return;
   }
-  const hash = await sha256(phrase);
-  if (!hashesEqual(hash, GATE)) {
-    msg.textContent = "no.";
-    pass.select();
+  gateBusy = true;
+  msg.textContent = "checking…";
+  try {
+    const keyed = await unlockKeyed(phrase);
+    if (keyed === "no" || keyed === "offline") {
+      msg.textContent = keyed === "no" ? "no." : "offline. the passphrase cannot be checked.";
+      pass.select();
+      return;
+    }
+    const editCode = await deriveEditCode(phrase);
+    pass.value = "";
+    msg.textContent = "";
+    openLog($("keep").checked, { ...keyed, editCode, phrase });
+  } finally {
+    gateBusy = false;
+  }
+});
+
+$("rekey").addEventListener("click", () => {
+  const form = $("rekey-form");
+  form.classList.toggle("is-off");
+  if (!form.classList.contains("is-off")) $("rekey-now").focus();
+});
+
+$("rekey-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (rekeying || !session) return;
+  const msg = $("rekey-msg");
+  const now = $("rekey-now").value.trim();
+  const next = $("rekey-next").value.trim();
+  if (next.length < MIN_PHRASE) {
+    msg.textContent = "use at least " + MIN_PHRASE + " characters.";
     return;
   }
-  pass.value = "";
-  openLog($("keep").checked, phrase);
+  if (next !== $("rekey-again").value.trim()) {
+    msg.textContent = "the new ones differ.";
+    return;
+  }
+  if (next === now) {
+    msg.textContent = "that is the current one.";
+    return;
+  }
+  rekeying = true;
+  msg.textContent = "re-sealing…";
+  try {
+    await changePhrase(now, next);
+    $("rekey-form").reset();
+    msg.textContent = "changed. commit the downloaded vault.json as log/vault.json.";
+  } catch (e) {
+    if (e instanceof StaleKey) relock();
+    else msg.textContent = e.message === "current" ? "the current passphrase is wrong." : "the server did not take it. nothing changed.";
+  } finally {
+    rekeying = false;
+  }
 });
 
 $("add-form").addEventListener("submit", (event) => {
@@ -1219,6 +1432,7 @@ $("find").addEventListener("input", () => {
 });
 
 $("export").addEventListener("click", exportPile);
+$("backup").addEventListener("click", backupVault);
 $("import").addEventListener("change", async () => {
   const file = $("import").files && $("import").files[0];
   $("import").value = "";
@@ -1231,19 +1445,9 @@ $("import").addEventListener("change", async () => {
 });
 $("lock").addEventListener("click", lock);
 
-window.addEventListener("keydown", (event) => {
-  const tag = event.target && event.target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA") return;
-  if ((event.key === "t" || event.key === "T") && !event.metaKey && !event.ctrlKey && !event.altKey) {
-    event.preventDefault();
-    cycleTheme();
-  }
-});
-
-phrase = storedPhrase();
-if (phrase && isOpen()) {
-  showBoard();
-  pullVault();
-} else {
-  showGate();
-}
+// Older builds kept the passphrase itself in storage.
+try {
+  sessionStorage.removeItem("pilgrimage-log-phrase");
+  localStorage.removeItem("pilgrimage-log-phrase");
+} catch (e) {}
+restore();

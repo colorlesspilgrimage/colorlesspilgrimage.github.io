@@ -53,6 +53,7 @@ html.log-open #board.is-off { display: flex !important; }
 .gate-body > label[for="pass"] { font-size: 10px; letter-spacing: 0.08em; }
 
 .gate input,
+.rekey input,
 .add-form input,
 .find,
 .time-edit input,
@@ -67,6 +68,7 @@ html.log-open #board.is-off { display: flex !important; }
 }
 
 .gate button,
+.rekey button,
 .add-form button,
 .session,
 .filters button,
@@ -115,6 +117,11 @@ html.log-open #board.is-off { display: flex !important; }
   padding: 16px 22px 12px;
   max-width: 1180px;
 }
+
+.rekey { display: flex; flex-wrap: wrap; gap: 8px; }
+.rekey input { flex: 1 1 160px; width: auto; min-width: 0; }
+.rekey button { flex: 0 0 auto; border-color: var(--fg); }
+.rekey .gate-msg { flex-basis: 100%; }
 
 .add-form { display: flex; gap: 8px; }
 .add-form input { flex: 1; min-width: 0; }
