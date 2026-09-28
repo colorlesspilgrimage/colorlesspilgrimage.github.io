@@ -155,6 +155,18 @@ button {
 
 .top a:hover { color: var(--accent); }
 
+.top-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.top-nav a {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
 .stage {
   position: relative;
   z-index: 1;
@@ -632,6 +644,7 @@ button {
   .status dl { flex-wrap: wrap; gap: 10px 14px; }
   .term { overflow: visible; }
   .links a { min-height: 44px; }
+  .top-nav a { min-height: 44px; }
   .sauron { right: 14px; bottom: 14px; }
   .sauron-art { font-size: 8px; }
 }

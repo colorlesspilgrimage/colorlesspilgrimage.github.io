@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en" data-theme="darcula">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>log — colorless pilgrimage</title>
+    <meta name="description" content="A private game log." />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#080907" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/log/log.css" />
+    <script>
+      try {
+        var saved = localStorage.getItem("pilgrimage-theme");
+        var known = ["darcula", "day", "string", "number", "function", "select"];
+        if (saved && known.indexOf(saved) !== -1) document.documentElement.setAttribute("data-theme", saved);
+        if (sessionStorage.getItem("pilgrimage-log-open") === "1" || localStorage.getItem("pilgrimage-log-keep") === "1") {
+          document.documentElement.classList.add("log-open");
+        }
+      } catch (e) {}
+    </script>
+  </head>
+  <body class="page-log">
+    <header class="top">
+      <h1><a class="brand" href="/"><span class="logo" aria-hidden="true">cp</span> colorless pilgrimage</a></h1>
+      <nav class="top-nav">
+        <a href="/">home</a>
+        <a href="https://github.com/colorlesspilgrimage">github</a>
+      </nav>
+    </header>
+
+    <main id="gate" class="gate-wrap">
+      <form id="gate-form" class="panel gate">
+        <header><span>gate</span><span>log/</span></header>
+        <div class="gate-body">
+          <p class="gate-kicker">backlog</p>
+          <label for="pass">passphrase</label>
+          <input id="pass" name="pass" type="password" autocomplete="current-password" required />
+          <p id="gate-msg" class="gate-msg" role="status"></p>
+          <button type="submit">enter</button>
+          <label class="keep"><input id="keep" type="checkbox" /> keep unlocked on this browser</label>
+        </div>
+      </form>
+    </main>
+
+    <main id="board" class="board is-off">
+      <form id="add-form" class="add-form">
+        <label class="sr" for="title">title</label>
+        <input id="title" name="title" placeholder="title" autocomplete="off" spellcheck="false" enterkeyhint="done" />
+        <button type="submit">add</button>
+      </form>
+      <div class="bar">
+        <div class="filters" role="group" aria-label="status">
+          <button type="button" data-filter="all" aria-pressed="true">all</button>
+          <button type="button" data-filter="to-play" aria-pressed="false">to play</button>
+          <button type="button" data-filter="playing" aria-pressed="false">playing</button>
+          <button type="button" data-filter="played" aria-pressed="false">played</button>
+        </div>
+        <input id="find" class="find" placeholder="find" autocomplete="off" spellcheck="false" aria-label="find" />
+        <p class="pile" id="pile">0 · 0m</p>
+        <div class="io">
+          <button type="button" id="export">export</button>
+          <label class="file">import<input id="import" type="file" accept="application/json,.json" /></label>
+          <button type="button" id="lock">lock</button>
+        </div>
+      </div>
+      <p class="ledger-note">stays in this browser. export keeps a copy. ending a session adds its time.</p>
+      <div id="groups"></div>
+    </main>
+
+    <p class="hint">press t · theme</p>
+    <script src="/log/log.js"></script>
+  </body>
+</html>
