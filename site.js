@@ -58,7 +58,6 @@ if (rootSegs) {
 const RESTORE = new WeakMap();
 const eats = [];
 let theme = "darcula";
-let eaten = 0;
 let mouthX = 0;
 let mouthY = 0;
 let pointerX = 0;
@@ -75,11 +74,26 @@ const eyeMark = $("eye-sq");
 const stageEl = document.querySelector(".stage");
 const sauronEl = $("sauron");
 const sauronArt = $("sauron-art");
+const termEl = document.querySelector(".term");
+const textNodes = new Map();
+const BITE_R = 11;
+const BITE = [[0, 0], [BITE_R, 0], [-BITE_R, 0], [0, BITE_R], [0, -BITE_R], [BITE_R * 0.7, BITE_R * 0.7], [-BITE_R * 0.7, BITE_R * 0.7]];
 let liveSegs = SEG_COUNT;
 let statsDirty = false;
 let boxes = null;
+let termBox = null;
 let frame = 0;
+let mouthLive = false;
+let mouthGhost = false;
+let mouthFeeding = false;
+let mouthTransform = "";
+let eyeAt = "";
+let leanAt = "";
 
+function dropBoxes() {
+  boxes = null;
+  termBox = null;
+}
 function layoutBoxes() {
   boxes = {
     eye: eyeFrame ? eyeFrame.getBoundingClientRect() : null,
@@ -88,15 +102,19 @@ function layoutBoxes() {
   };
 }
 function requestTick() {
-  if (frame) return;
+  if (frame || document.hidden) return;
   frame = requestAnimationFrame(loop);
 }
 if (window.ResizeObserver) {
-  const boxesObserver = new ResizeObserver(() => { boxes = null; });
-  [sauronEl, eyeFrame, stageEl].forEach((node) => { if (node) boxesObserver.observe(node); });
+  const boxesObserver = new ResizeObserver(dropBoxes);
+  [sauronEl, eyeFrame, stageEl, termEl].forEach((node) => { if (node) boxesObserver.observe(node); });
 }
 function text(id, value) {
-  const node = $(id);
+  let node = textNodes.get(id);
+  if (node === undefined) {
+    node = document.getElementById(id);
+    textNodes.set(id, node);
+  }
   if (node && node.textContent !== value) node.textContent = value;
 }
 function paintThemeButtons() {
@@ -114,16 +132,17 @@ function cycleTheme() {
   const index = THEMES.indexOf(theme);
   setTheme(THEMES[(index + 1) % THEMES.length]);
 }
-function grownStats() {
-  const live = liveSegs;
-  const ratio = SEG_COUNT === 0 ? 1 : live / SEG_COUNT;
-  text("stat-cuts", String(SEG_COUNT - live));
+function grownStats(full) {
+  const ratio = SEG_COUNT === 0 ? 1 : liveSegs / SEG_COUNT;
+  const pct = Math.round(ratio * 100) + "%";
+  text("stat-cuts", String(SEG_COUNT - liveSegs));
+  text("stat-length", String(Math.round(TREE_LENGTH * ratio)));
+  text("stat-grown", pct);
+  text("stat-reached", Math.round(ratio * 6) + " / 6");
+  text("stat-root", pct);
+  if (!full) return;
   text("stat-members", String(SEG_COUNT));
   text("stat-tips", String(TREE_TIPS));
-  text("stat-length", String(Math.round(TREE_LENGTH * ratio)));
-  text("stat-grown", Math.round(ratio * 100) + "%");
-  text("stat-reached", Math.round(ratio * 6) + " / 6");
-  text("stat-root", Math.round(ratio * 100) + "%");
 }
 function pulse() {
   const now = performance.now();
@@ -152,9 +171,11 @@ function devour(node) {
     liveSegs -= 1;
     statsDirty = true;
   }
-  eaten += 1;
   eats.push(performance.now());
-  mouthEl?.classList.add("feeding");
+  if (!mouthFeeding && mouthEl) {
+    mouthFeeding = true;
+    mouthEl.classList.add("feeding");
+  }
   const previous = RESTORE.get(target);
   if (previous) window.clearTimeout(previous);
   const order = Number(target.dataset.order || 0);
@@ -168,10 +189,14 @@ function devour(node) {
   }, reduced ? 400 : wait));
   requestTick();
 }
+function inTerm(x, y) {
+  if (!termBox && termEl) termBox = termEl.getBoundingClientRect();
+  if (!termBox || !termBox.width) return true;
+  return x >= termBox.left - 14 && x <= termBox.right + 14 && y >= termBox.top - 14 && y <= termBox.bottom + 14;
+}
 function sample(x, y) {
-  const radius = 11;
-  const points = [[0, 0], [radius, 0], [-radius, 0], [0, radius], [0, -radius], [radius * 0.7, radius * 0.7], [-radius * 0.7, radius * 0.7]];
-  for (const [dx, dy] of points) devour(document.elementFromPoint(x + dx, y + dy));
+  if (!inTerm(x, y)) return;
+  for (let i = 0; i < BITE.length; i++) devour(document.elementFromPoint(x + BITE[i][0], y + BITE[i][1]));
   if (!statsDirty) return;
   statsDirty = false;
   grownStats();
@@ -186,7 +211,9 @@ function placeEye() {
   const x = Math.max(6, Math.min(86, nx * 70 + 8));
   const y = Math.max(8, Math.min(62, ny * 40 + 14));
   const next = "translate(" + x.toFixed(1) + " " + y.toFixed(1) + ")";
-  if (eyeMark.getAttribute("transform") !== next) eyeMark.setAttribute("transform", next);
+  if (next === eyeAt) return;
+  eyeAt = next;
+  eyeMark.setAttribute("transform", next);
 }
 
 const SAURON = [
@@ -214,6 +241,14 @@ SAURON.forEach((line, y) => {
 });
 const IRIS_XS = [...new Set(IRIS.map((cell) => cell.x))].sort((a, b) => a - b);
 const IRIS_YS = [...new Set(IRIS.map((cell) => cell.y))].sort((a, b) => a - b);
+const IRIS_BY_X = new Map();
+for (let i = 0; i < IRIS.length; i++) {
+  const cell = IRIS[i];
+  let ys = IRIS_BY_X.get(cell.x);
+  if (!ys) IRIS_BY_X.set(cell.x, ys = []);
+  ys.push(cell.y);
+}
+IRIS_BY_X.forEach((ys) => ys.sort((a, b) => a - b));
 let aimX = IRIS_XS[Math.floor(IRIS_XS.length / 2)];
 let aimY = (IRIS_YS[0] + IRIS_YS[IRIS_YS.length - 1]) / 2;
 let leanX = 0;
@@ -227,7 +262,7 @@ function paintSauron(ax, ay) {
     const d = Math.abs(x - ax);
     if (d < best) { best = d; col = x; }
   }
-  const ys = IRIS.filter((cell) => cell.x === col).map((cell) => cell.y).sort((a, b) => a - b);
+  const ys = IRIS_BY_X.get(col) || [];
   const lit = new Set();
   if (ys.length <= 3) ys.forEach((y) => lit.add(y));
   else {
@@ -284,8 +319,11 @@ function placeSauron() {
   aimY += (ty - aimY) * k;
   leanX += (lx - leanX) * k;
   leanY += (ly - leanY) * k;
-  if (reduced) sauronArt.style.transform = "";
-  else sauronArt.style.transform = "translate(" + leanX.toFixed(2) + "px," + leanY.toFixed(2) + "px) rotate(" + (leanX * 0.42).toFixed(2) + "deg)";
+  const nextLean = reduced ? "" : "translate(" + leanX.toFixed(2) + "px," + leanY.toFixed(2) + "px) rotate(" + (leanX * 0.42).toFixed(2) + "deg)";
+  if (nextLean !== leanAt) {
+    leanAt = nextLean;
+    sauronArt.style.transform = nextLean;
+  }
   const key = Math.round(aimX) + ":" + Math.round(aimY);
   if (key !== slitKey) {
     slitKey = key;
@@ -299,9 +337,20 @@ function tick() {
   const k = reduced ? 1 : 0.22;
   mouthX += (pointerX - mouthX) * k;
   mouthY += (pointerY - mouthY) * k;
-  mouthEl.style.transform = "translate(" + mouthX + "px, " + mouthY + "px)";
-  if (hasPointer) mouthEl.classList.add("live");
-  mouthEl.classList.toggle("ghost", !hasPointer);
+  const nextMouth = "translate(" + mouthX.toFixed(2) + "px, " + mouthY.toFixed(2) + "px)";
+  if (nextMouth !== mouthTransform) {
+    mouthTransform = nextMouth;
+    mouthEl.style.transform = nextMouth;
+  }
+  if (hasPointer !== mouthLive) {
+    mouthLive = hasPointer;
+    mouthEl.classList.toggle("live", hasPointer);
+  }
+  const ghost = !hasPointer;
+  if (ghost !== mouthGhost) {
+    mouthGhost = ghost;
+    mouthEl.classList.toggle("ghost", ghost);
+  }
   const speed = Math.hypot(pointerX - mouthX, pointerY - mouthY);
   if (hasPointer && speed > 0.7) sample(mouthX, mouthY);
   if (!boxes) layoutBoxes();
@@ -331,60 +380,74 @@ function startWheel() {
   const arcPath = document.getElementById("wheel-arc");
   let offset = 1.5;
   let drag = null;
+  let arcDrawn = false;
+  let mobileLaid = false;
   const mobileQuery = window.matchMedia("(max-width: 860px)");
   const horizontal = () => mobileQuery.matches;
+  const writeStyle = (node, prop, value) => {
+    if (node.style[prop] !== value) node.style[prop] = value;
+  };
+  const drawArc = () => {
+    if (arcDrawn) return;
+    arcDrawn = true;
+    sparks.forEach((spark, index) => {
+      const point = arc((index + 0.5) / sparks.length);
+      const jitter = ((index * 17) % 7) - 3;
+      spark.style.left = "calc(" + point.x + "% + " + jitter + "px)";
+      spark.style.top = "calc(" + point.y + "% + " + ((index % 5) - 2) + "px)";
+    });
+    if (!arcPath) return;
+    let d = "";
+    for (let i = 0; i <= 24; i++) {
+      const point = arc(i / 24);
+      d += (i === 0 ? "M " : "L ") + point.x + " " + point.y + " ";
+    }
+    arcPath.setAttribute("d", d);
+  };
   const paint = () => {
     const mobile = horizontal();
     const spacing = mobile ? 0.22 : 0.24;
-    cards.forEach((card, index) => {
-      if (mobile) {
-        card.style.transform = "";
-        card.style.left = "";
-        card.style.top = "";
-        card.style.visibility = "";
-        card.style.zIndex = "";
-        return;
+    if (mobile) {
+      if (!mobileLaid) {
+        mobileLaid = true;
+        cards.forEach((card) => {
+          writeStyle(card, "transform", "");
+          writeStyle(card, "left", "");
+          writeStyle(card, "top", "");
+          writeStyle(card, "visibility", "");
+          writeStyle(card, "zIndex", "");
+          writeStyle(card, "opacity", "");
+        });
       }
+      const mid = root.scrollLeft + root.clientWidth / 2;
+      cards.forEach((card) => {
+        const center = card.offsetLeft + card.offsetWidth / 2;
+        card.classList.toggle("is-hot", Math.abs(center - mid) < card.offsetWidth * 0.45);
+      });
+      root.dataset.ready = "1";
+      return;
+    }
+    mobileLaid = false;
+    drawArc();
+    cards.forEach((card, index) => {
       const t = 0.5 + (index - offset) * spacing;
       const dist = Math.abs(index - offset);
       if (t < 0.05 || t > 0.9) {
-        card.style.visibility = "hidden";
+        writeStyle(card, "visibility", "hidden");
         return;
       }
       const point = arc(t);
       const focus = dist < 0.45;
       const scale = focus ? 1 : Math.max(0.72, 0.84 - dist * 0.06);
       const rot = Math.max(-8, Math.min(8, point.rot * 0.18));
-      card.style.visibility = "visible";
-      card.style.left = point.x + "%";
-      card.style.top = point.y + "%";
-      card.style.transform = "translate(-50%, -50%) rotate(" + rot + "deg) scale(" + scale + ")";
-      card.style.zIndex = String(20 - Math.round(dist));
+      writeStyle(card, "visibility", "visible");
+      writeStyle(card, "left", point.x + "%");
+      writeStyle(card, "top", point.y + "%");
+      writeStyle(card, "transform", "translate(-50%, -50%) rotate(" + rot + "deg) scale(" + scale + ")");
+      writeStyle(card, "zIndex", String(20 - Math.round(dist)));
       card.classList.toggle("is-hot", focus);
-      card.style.opacity = String(Math.max(0.35, 1 - dist * 0.16));
+      writeStyle(card, "opacity", String(Math.max(0.35, 1 - dist * 0.16)));
     });
-    if (mobile) {
-      const mid = root.scrollLeft + root.clientWidth / 2;
-      cards.forEach((card) => {
-        const center = card.offsetLeft + card.offsetWidth / 2;
-        card.classList.toggle("is-hot", Math.abs(center - mid) < card.offsetWidth * 0.45);
-      });
-    } else {
-      sparks.forEach((spark, index) => {
-        const point = arc((index + 0.5) / sparks.length);
-        const jitter = ((index * 17) % 7) - 3;
-        spark.style.left = "calc(" + point.x + "% + " + jitter + "px)";
-        spark.style.top = "calc(" + point.y + "% + " + ((index % 5) - 2) + "px)";
-      });
-      if (arcPath) {
-        let d = "";
-        for (let i = 0; i <= 24; i++) {
-          const point = arc(i / 24);
-          d += (i === 0 ? "M " : "L ") + point.x + " " + point.y + " ";
-        }
-        arcPath.setAttribute("d", d);
-      }
-    }
     root.dataset.ready = "1";
   };
   root.addEventListener("wheel", (event) => {
@@ -420,7 +483,7 @@ function startWheel() {
     event.stopPropagation();
   }, true);
   window.addEventListener("resize", () => {
-    boxes = null;
+    dropBoxes();
     paint();
   });
   paint();
@@ -431,7 +494,7 @@ if (THEMES.indexOf(savedTheme) !== -1) theme = savedTheme;
 reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 paintThemeButtons();
 paintEye();
-grownStats();
+grownStats(true);
 pulse();
 startWheel();
 document.querySelectorAll("[data-theme-id]").forEach((node) => {
@@ -449,13 +512,16 @@ window.addEventListener("pointermove", (event) => {
     seenPointer = true;
     mouthX = pointerX;
     mouthY = pointerY;
+    requestTick();
     return;
   }
   const dist = Math.hypot(pointerX - prevX, pointerY - prevY);
-  const steps = Math.max(1, Math.ceil(dist / 12));
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    sample(prevX + (pointerX - prevX) * t, prevY + (pointerY - prevY) * t);
+  if (dist >= 1) {
+    const steps = Math.ceil(dist / 12);
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      sample(prevX + (pointerX - prevX) * t, prevY + (pointerY - prevY) * t);
+    }
   }
   requestTick();
 }, { passive: true });
@@ -487,12 +553,20 @@ window.addEventListener("keydown", (event) => {
 let lastPulse = 0;
 function loop(now) {
   frame = 0;
+  if (document.hidden) return;
   const moving = tick();
   if (eats.length && now - lastPulse > 240) {
     lastPulse = now;
     pulse();
   }
-  if (RESTORE.size === 0) mouthEl?.classList.remove("feeding");
+  if (mouthFeeding && RESTORE.size === 0 && mouthEl) {
+    mouthFeeding = false;
+    mouthEl.classList.remove("feeding");
+  }
   if (moving || eats.length) requestTick();
 }
+document.addEventListener("visibilitychange", () => {
+  document.documentElement.classList.toggle("page-hidden", document.hidden);
+  if (!document.hidden) requestTick();
+});
 requestTick();

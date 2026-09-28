@@ -30,6 +30,8 @@ let pushTimer = 0;
 let pushing = false;
 let pushTries = 0;
 let suspendPush = false;
+let clockTimer = 0;
+let filterButtons = null;
 
 function $(id) { return document.getElementById(id); }
 
@@ -730,21 +732,25 @@ function render() {
   if (!groups) return;
   const counts = { all: state.entries.length, playing: 0, "to-play": 0, played: 0 };
   for (const entry of state.entries) counts[entry.status] += 1;
-  document.querySelectorAll("[data-filter]").forEach((button) => {
+  if (!filterButtons) filterButtons = document.querySelectorAll("[data-filter]");
+  filterButtons.forEach((button) => {
     const key = button.dataset.filter;
-    button.setAttribute("aria-pressed", key === filter ? "true" : "false");
-    const label = key === "to-play" ? "to play" : key;
-    button.textContent = label + " " + (counts[key] || 0);
+    const pressed = key === filter ? "true" : "false";
+    if (button.getAttribute("aria-pressed") !== pressed) button.setAttribute("aria-pressed", pressed);
+    const label = (key === "to-play" ? "to play" : key) + " " + (counts[key] || 0);
+    if (button.textContent !== label) button.textContent = label;
   });
   const pile = $("pile");
   if (pile) pile.textContent = state.entries.length + " · " + formatPlayed(totalBanked());
   const rows = visibleEntries();
   if (!state.entries.length) {
     groups.innerHTML = '<p class="empty">the pile is empty.</p>';
+    armClock();
     return;
   }
   if (!rows.length) {
     groups.innerHTML = '<p class="empty">nothing matches.</p>';
+    armClock();
     return;
   }
   const draftTitle = document.querySelector("[data-title-edit]");
@@ -787,6 +793,29 @@ function render() {
     hours.focus();
     hours.select();
   }
+  armClock();
+}
+
+function armClock() {
+  const open = document.documentElement.classList.contains("log-open");
+  let live = false;
+  if (open) {
+    for (const entry of state.entries) {
+      if (entry.sessionStart && pendingEndId !== entry.id) {
+        live = true;
+        break;
+      }
+    }
+  }
+  if (live) {
+    if (clockTimer) return;
+    tickClocks();
+    clockTimer = window.setInterval(tickClocks, 1000);
+    return;
+  }
+  if (!clockTimer) return;
+  window.clearInterval(clockTimer);
+  clockTimer = 0;
 }
 
 function tickClocks() {
@@ -900,6 +929,7 @@ function showGate() {
   $("gate").classList.remove("is-off");
   const pass = $("pass");
   if (pass) pass.focus();
+  armClock();
 }
 
 function lock() {
@@ -1171,6 +1201,18 @@ document.querySelectorAll("[data-filter]").forEach((button) => {
   });
 });
 
+document.addEventListener("visibilitychange", () => {
+  document.documentElement.classList.toggle("page-hidden", document.hidden);
+  if (document.hidden) {
+    if (clockTimer) {
+      window.clearInterval(clockTimer);
+      clockTimer = 0;
+    }
+    return;
+  }
+  armClock();
+});
+
 $("find").addEventListener("input", () => {
   find = $("find").value;
   render();
@@ -1197,8 +1239,6 @@ window.addEventListener("keydown", (event) => {
     cycleTheme();
   }
 });
-
-window.setInterval(tickClocks, 1000);
 
 phrase = storedPhrase();
 if (phrase && isOpen()) {

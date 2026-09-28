@@ -400,3 +400,5 @@ html.log-open #board.is-off { display: flex !important; }
 @media (prefers-reduced-motion: reduce) {
   .live-pip { animation: none; }
 }
+
+html.page-hidden .live-pip { animation-play-state: paused; }

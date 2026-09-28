@@ -468,6 +468,11 @@ button {
   50% { opacity: 1; }
 }
 
+html.page-hidden .spark,
+html.page-hidden .sauron-art {
+  animation-play-state: paused;
+}
+
 @media (max-width: 860px) {
   body { overflow: auto; overflow-x: hidden; }
   .desk { height: auto; min-height: 100dvh; overflow: visible; max-width: 100%; }
